@@ -1,0 +1,194 @@
+/* The admin page. It borrows the game's stylesheet for type, colour, buttons
+   and dialogs, and adds only what a back office needs: a tally, a list of
+   rooms laid out like tables in a card room, and plain lists of facts. */
+
+.admin { --live: #46a758; --danger: var(--suit-red); }
+.admin code { font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace; font-size: 0.88em; padding: 1px 5px; border-radius: 5px; background: color-mix(in srgb, var(--ink) 9%, transparent); overflow-wrap: anywhere; }
+.admin pre { margin: 0; padding: 12px 14px; border-radius: var(--r-ui); background: color-mix(in srgb, var(--ink) 9%, transparent); overflow-x: auto; }
+.admin pre code { padding: 0; background: none; }
+.admin small { color: var(--muted); font-size: 0.86em; font-weight: 400; }
+.muted { color: var(--muted); }
+.small { font-size: 0.9rem; }
+.warn { color: var(--warn); }
+.link-danger, .btn-danger { color: var(--danger); }
+.btn-danger-solid { background: var(--deck-red); border-color: var(--deck-red); color: #fff; box-shadow: 0 3px 0 color-mix(in srgb, var(--deck-red) 60%, #000); }
+.btn-danger-solid:hover:not(:disabled) { background: color-mix(in srgb, var(--deck-red) 86%, #fff); }
+a.btn { text-decoration: none; }
+.tool-small { width: 32px; height: 32px; }
+.tool-small svg { width: 17px; height: 17px; }
+.admin input[type='text'], .admin input[type='password'], .admin input[type='search'], .admin input[type='datetime-local'], .admin select, .admin textarea {
+  width: 100%; min-height: 44px; padding: 9px 12px; border: 1.5px solid var(--line); border-radius: var(--r-ui);
+  background: var(--panel); color: var(--ink); font-weight: 500;
+}
+.admin textarea { resize: vertical; line-height: 1.4; }
+.admin input:focus-visible, .admin select:focus-visible, .admin textarea:focus-visible { outline: 3px solid var(--ink); outline-offset: 1px; }
+
+/* ───────────── Signed out ───────────── */
+
+.gate { min-height: 100dvh; display: grid; align-content: center; justify-items: start; gap: 34px; max-width: 460px; margin: 0 auto; padding: 32px 24px; }
+.gate-form { display: grid; gap: 16px; width: 100%; }
+.gate-form h1 { font-size: 2.6rem; font-weight: 850; font-stretch: 68%; line-height: 1; text-transform: uppercase; }
+.gate-form .btn { justify-self: start; }
+.gate-error { color: var(--danger); font-weight: 650; }
+
+/* ───────────── Signed in ───────────── */
+
+.desk-tag { font-weight: 800; font-stretch: 78%; font-size: 1.05rem; padding: 2px 10px; border: 1.5px solid var(--line); border-radius: 999px; }
+.desk-fresh { margin-right: 6px; font-size: 0.86rem; color: var(--muted); display: inline-flex; align-items: center; gap: 7px; white-space: nowrap; }
+.desk-fresh::before { content: ''; width: 8px; height: 8px; border-radius: 50%; background: var(--live); }
+.desk-fresh.is-stale::before { background: var(--warn); }
+.desk-fresh:empty { display: none; }
+.desk-body { max-width: 1180px; margin: 0 auto; padding: 22px 20px 80px; display: grid; gap: 22px; }
+.desk-body > * { min-width: 0; }
+
+/* The tally: four counts in the card face's own numerals. */
+.tally { margin: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border: 1.5px solid var(--line); border-radius: var(--r-mat); background: var(--panel); overflow: hidden; }
+.tally > div { display: flex; flex-direction: column-reverse; justify-content: flex-end; gap: 2px; padding: 16px 20px 15px; border-left: 1.5px solid var(--line); }
+.tally > div:first-child { border-left: 0; }
+.tally dd { margin: 0; font-family: var(--serif); font-variant-numeric: normal; font-weight: 800; font-size: clamp(2rem, 4.6vw, 3rem); line-height: 1; }
+.tally dt { font-weight: 650; line-height: 1.25; }
+.tally dt small { display: block; }
+
+.tabs { display: flex; gap: 4px; border-bottom: 1.5px solid var(--line); }
+.tabs button { border: 0; background: none; padding: 10px 16px 11px; font-weight: 750; font-stretch: 84%; font-size: 1.08rem; color: var(--muted); border-bottom: 3px solid transparent; margin-bottom: -1.5px; }
+.tabs button:hover { color: var(--ink); }
+.tabs button[aria-selected='true'] { color: var(--ink); border-bottom-color: var(--ink); }
+[role='tabpanel'] { display: grid; gap: 16px; }
+
+.roombar, .serverbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.roombar input[type='search'] { flex: 1 1 260px; max-width: 420px; }
+.roombar select { width: auto; flex: 0 1 auto; }
+.roombar-gap { flex: 1 1 0; }
+.empty { padding: 34px 20px; border: 1.5px dashed var(--line); border-radius: var(--r-mat); color: var(--muted); text-align: center; }
+
+/* ───────────── A room ───────────── */
+
+.rooms { display: grid; gap: 14px; }
+.aroom {
+  display: grid; gap: 14px; padding: 18px 20px 16px 22px; border: 1.5px solid var(--line); border-radius: var(--r-mat);
+  background: var(--panel); position: relative; overflow: hidden;
+}
+/* The edge takes the colour of whoever's turn it is, as the mat does in the game. */
+.aroom::before { content: ''; position: absolute; inset: 0 auto 0 0; width: 6px; background: var(--turn, var(--line)); }
+.aroom:not(.is-used)::before { opacity: 0.55; }
+.room-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 6px 20px; }
+.room-name { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.room-name h2 { font-size: 1.7rem; font-weight: 850; font-stretch: 70%; line-height: 1.05; overflow-wrap: anywhere; }
+.room-open { margin-left: 6px; font-size: 0.92rem; }
+.room-state { font-weight: 650; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.live { width: 10px; height: 10px; border-radius: 50%; background: var(--live); box-shadow: 0 0 0 4px color-mix(in srgb, var(--live) 26%, transparent); flex: none; }
+.room-facts { margin: 0; display: grid; grid-template-columns: repeat(4, minmax(0, auto)); justify-content: start; gap: 10px 34px; }
+.room-facts dt { font-size: 0.84rem; color: var(--muted); }
+.room-facts dd { margin: 0; font-weight: 600; }
+.room-facts dd small { display: block; }
+.room-alias { font-size: 0.9rem; color: var(--muted); }
+.room-acts { display: flex; flex-wrap: wrap; gap: 8px; }
+.room-acts .btn-danger { margin-left: auto; }
+.room-nobody { font-size: 0.94rem; }
+
+.tagp { display: inline-flex; align-items: center; gap: 4px; padding: 1px 8px; border-radius: 999px; border: 1.5px solid var(--line); font-size: 0.78rem; font-weight: 700; color: var(--muted); white-space: nowrap; }
+.tagp svg { width: 13px; height: 13px; }
+.tagp-icon { padding: 2px 5px; }
+.tagp-warn { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 60%, transparent); }
+
+.pdot {
+  display: inline-grid; place-items: center; flex: none; width: 28px; height: 28px; border-radius: 50%;
+  background: var(--p); color: var(--on-p); font-size: 0.68rem; font-weight: 800; letter-spacing: 0.02em;
+}
+.pdot svg { width: 15px; height: 15px; }
+.pdot.is-away { background: none; color: var(--muted); box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--p) 70%, var(--panel)); }
+
+.room-people { border-top: 1.5px solid var(--line); margin: 0 -20px -16px -22px; }
+.room-people > summary { display: flex; align-items: center; gap: 12px; padding: 11px 20px 11px 22px; cursor: pointer; list-style: none; font-weight: 650; }
+.room-people > summary::-webkit-details-marker { display: none; }
+.room-people > summary::after { content: ''; margin-left: auto; width: 9px; height: 9px; border-right: 2.5px solid var(--muted); border-bottom: 2.5px solid var(--muted); rotate: 45deg; translate: 0 -3px; transition: rotate 0.15s ease; }
+.room-people[open] > summary::after { rotate: 225deg; translate: 0 2px; }
+.room-people > summary:hover { background: color-mix(in srgb, var(--ink) 5%, transparent); }
+.chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.ptable-wrap { overflow-x: auto; border-top: 1.5px solid var(--line); }
+.ptable { width: 100%; border-collapse: collapse; font-size: 0.94rem; }
+.ptable th, .ptable td { padding: 9px 12px; text-align: left; vertical-align: middle; border-top: 1px solid color-mix(in srgb, var(--line) 70%, transparent); }
+.ptable thead th { border-top: 0; font-size: 0.8rem; font-weight: 600; color: var(--muted); padding-top: 8px; padding-bottom: 6px; white-space: nowrap; }
+.ptable th:first-child, .ptable td:first-child { padding-left: 22px; }
+.ptable tbody th { font-weight: 700; white-space: nowrap; }
+.ptable tbody th > * { vertical-align: middle; }
+.ptable tbody th .pdot { margin-right: 9px; }
+.ptable tbody th .tagp { margin-left: 7px; }
+.ptable tr.is-turn th .pname { box-shadow: 0 2px 0 var(--ink); }
+.ptable tr.is-away .pname { color: var(--muted); }
+.ptable .is-old code { opacity: 0.6; }
+.ptable .on { color: var(--live); font-weight: 700; }
+.ptable .pacts { text-align: right; white-space: nowrap; }
+.ptable .pacts .link { font-size: 0.9rem; margin-left: 14px; }
+
+/* ───────────── Server facts and the log ───────────── */
+
+.facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 430px), 1fr)); gap: 14px; align-items: start; }
+.fact-group { border: 1.5px solid var(--line); border-radius: var(--r-mat); background: var(--panel); padding: 16px 20px 8px; }
+.fact-group h2 { font-size: 1.25rem; font-weight: 800; font-stretch: 78%; margin-bottom: 6px; }
+.fact-group dl { margin: 0; }
+.fact-group dl > div { display: grid; grid-template-columns: minmax(120px, 38%) minmax(0, 1fr); gap: 4px 16px; padding: 9px 0; border-top: 1px solid color-mix(in srgb, var(--line) 70%, transparent); }
+.fact-group dl > div:first-child { border-top: 0; }
+.fact-group dt { color: var(--muted); }
+.fact-group dd { margin: 0; font-weight: 600; overflow-wrap: anywhere; }
+.fact-group dd small { display: block; }
+
+.log-note { max-width: 70ch; }
+.events { border: 1.5px solid var(--line); border-radius: var(--r-mat); background: var(--panel); overflow: hidden; }
+.events li { display: grid; grid-template-columns: 170px minmax(0, 1fr); gap: 4px 16px; padding: 10px 20px; border-top: 1px solid color-mix(in srgb, var(--line) 70%, transparent); }
+.events li:first-child { border-top: 0; }
+.events .ev-time { color: var(--muted); font-size: 0.92rem; }
+.events .empty { display: block; border: 0; border-radius: 0; }
+
+/* ───────────── Dialog contents ───────────── */
+
+.dlg-body { display: grid; gap: 14px; }
+.dlg-body > p { max-width: 46ch; }
+.choice, .tick { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 12px; align-items: start; cursor: pointer; }
+.choice { padding: 11px 14px; border: 1.5px solid var(--line); border-radius: var(--r-ui); }
+.choice:has(input:checked) { border-color: var(--ink); background: color-mix(in srgb, var(--ink) 6%, transparent); }
+.choice input, .tick input { width: 19px; height: 19px; margin: 2px 0 0; accent-color: var(--ink); }
+.choice small, .tick small { display: block; margin-top: 2px; }
+.when { display: grid; gap: 10px; padding-left: 4px; }
+.quick { display: flex; flex-wrap: wrap; gap: 8px; }
+.preview { font-size: 0.94rem; min-height: 1.4em; overflow-wrap: anywhere; }
+.preview:empty { display: none; }
+#random-name { justify-self: start; }
+
+/* ───────────── Small screens ───────────── */
+
+@media (max-width: 900px) {
+  .tally { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .tally > div:nth-child(3) { border-left: 0; }
+  .tally > div:nth-child(n + 3) { border-top: 1.5px solid var(--line); }
+  .room-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 20px; }
+}
+@media (max-width: 720px) {
+  .desk-body { padding: 16px 16px 80px; gap: 18px; }
+  .roombar-gap { display: none; }
+  .roombar input[type='search'] { flex-basis: 100%; max-width: none; }
+  .aroom { padding: 16px 16px 14px 20px; }
+  .room-people { margin: 0 -16px -14px -20px; }
+  .room-people > summary { padding: 11px 16px 11px 20px; }
+  .room-acts .btn-danger { margin-left: 0; }
+  .events li { grid-template-columns: 1fr; }
+  .fact-group dl > div { grid-template-columns: 1fr; }
+
+  /* The player table turns into a short list of labelled lines. */
+  .ptable thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+  .ptable, .ptable tbody, .ptable tr, .ptable th, .ptable td { display: block; }
+  .ptable tr { padding: 11px 16px 11px 20px; border-top: 1px solid color-mix(in srgb, var(--line) 70%, transparent); }
+  .ptable tbody tr:first-child { border-top: 0; }
+  .ptable th, .ptable td, .ptable th:first-child, .ptable td:first-child { padding: 2px 0; border: 0; }
+  .ptable tbody th { white-space: normal; padding-bottom: 6px; }
+  .ptable td[data-label] { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; padding-left: 104px; position: relative; min-height: 1.6em; }
+  .ptable td[data-label]::before { content: attr(data-label); position: absolute; left: 0; color: var(--muted); font-size: 0.86rem; }
+  .ptable .pacts { text-align: left; padding-top: 8px; }
+  .ptable .pacts .link { margin: 0 18px 0 0; }
+}
+@media (max-width: 420px) {
+  .tally > div { padding: 12px 14px; }
+}
+
+/* The game keeps its toasts clear of the play button; here they can sit low. */
+.admin .toasts { bottom: max(24px, calc(env(safe-area-inset-bottom) + 24px)); }

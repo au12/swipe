@@ -1,8 +1,8 @@
 // One WebSocket per room, with automatic reconnect.
 
 export class Connection {
-  constructor({ room, token, name, claim = null, onState, onError, onFatal, onStatus, onJoin, onSeat, onClaim }) {
-    Object.assign(this, { room, token, name, claim, onState, onError, onFatal, onStatus, onJoin, onSeat, onClaim });
+  constructor({ room, token, name, claim = null, onState, onError, onFatal, onStatus, onJoin, onSeat, onClaim, onNote }) {
+    Object.assign(this, { room, token, name, claim, onState, onError, onFatal, onStatus, onJoin, onSeat, onClaim, onNote });
     this.ws = null;
     this.closed = false;
     this.attempt = 0;
@@ -71,6 +71,8 @@ export class Connection {
         this.onSeat?.(msg);
       } else if (msg.t === 'claim') {
         this.onClaim?.(msg.ok);
+      } else if (msg.t === 'note') {
+        this.onNote?.(msg.m); // a message from whoever runs the server
       }
     };
     ws.onclose = () => {

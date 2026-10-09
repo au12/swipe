@@ -5,6 +5,7 @@
 //   POST /api/rooms        create a room            -> { code }
 //   GET  /api/rooms/<code> does this room exist?    -> { exists, players, locked }
 //   GET  /healthz          liveness probe
+//   GET  /admin            the admin page (see admin.js; off unless ADMIN_PASSWORD is set)
 //   GET  /sw.js            the service worker (installable app, notifications)
 //   GET  /manifest.webmanifest   the app manifest; with ?room=&seat= it opens
 //                          straight into that room and brings the seat along
@@ -16,9 +17,11 @@ import path from 'node:path';
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { WebSocketServer } from 'ws';
 import { config, log } from './config.js';
-import { normalizeCode } from './names.js';
+import net from 'node:net';
+import { normalizeCode, text } from './names.js';
 import { Rooms, cleanSeatCode } from './rooms.js';
 import * as push from './push.js';
+import { createAdmin } from './admin.js';
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -48,10 +51,48 @@ rooms.load();
 
 const escapeHtml = (s) => String(s).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 
+const cleanIp = (raw) => {
+  const ip = text(raw).trim().replace(/^::ffff:/i, '');
+  return net.isIP(ip) ? ip : '';
+};
+
+/** Loopback, a home or Docker network, or link-local: where a reverse proxy on your own kit connects from. */
+function isPrivate(ip) {
+  if (net.isIPv4(ip)) {
+    const [a, b] = ip.split('.').map(Number);
+    return a === 10 || a === 127 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 169 && b === 254) || (a === 100 && b >= 64 && b <= 127);
+  }
+  return ip === '::1' || /^f[cd]/i.test(ip) || /^fe[89ab]/i.test(ip);
+}
+
+/**
+ * What a proxy says about the visitor is believed only when TRUST_PROXY says
+ * there is a proxy and the connection really comes from a private address,
+ * which is where your own proxy connects from. Someone who reaches the
+ * server's port directly from the internet cannot pass themselves off.
+ */
+const viaProxy = (req) => config.trustProxy > 0 && (config.trustAnyProxy || isPrivate(cleanIp(req.socket.remoteAddress)));
+
+/**
+ * The visitor's address. Each proxy in front of the server adds the address
+ * it heard from to the end of X-Forwarded-For, so with TRUST_PROXY proxies the
+ * entry that many from the end is the one a visitor cannot make up.
+ */
 function clientIp(req) {
-  const fwd = req.headers['x-forwarded-for'];
-  if (typeof fwd === 'string' && fwd.length) return fwd.split(',')[0].trim();
-  return req.socket.remoteAddress ?? 'unknown';
+  const direct = cleanIp(req.socket.remoteAddress) || 'unknown';
+  if (!viaProxy(req)) return direct;
+  const chain = text(req.headers['x-forwarded-for'])
+    .split(',')
+    .map((part) => part.trim())
+    .filter(Boolean);
+  if (!chain.length) return direct;
+  return cleanIp(chain[Math.max(0, chain.length - config.trustProxy)]) || direct;
+}
+
+/** True if the visitor reached the site over HTTPS (directly, or as the proxy reports it). */
+function isHttps(req) {
+  if (req.socket.encrypted) return true;
+  return viaProxy(req) && text(req.headers['x-forwarded-proto']).split(',')[0].trim() === 'https';
 }
 
 /** Tiny fixed-window limiter: `limit` hits per `windowMs` per key. */
@@ -68,8 +109,9 @@ const createLimit = limiter(20, 60_000);
 const claimLimit = limiter(12, 60_000); // wrong seat codes are not free to guess
 
 function sameSecret(a, b) {
-  const ha = createHash('sha256').update(String(a)).digest();
-  const hb = createHash('sha256').update(String(b)).digest();
+  if (typeof a !== 'string' || typeof b !== 'string') return false;
+  const ha = createHash('sha256').update(a).digest();
+  const hb = createHash('sha256').update(b).digest();
   return timingSafeEqual(ha, hb);
 }
 
@@ -165,7 +207,16 @@ function localPath(rawUrl) {
 
 // ───────────────────────── HTTP ─────────────────────────
 
-const server = http.createServer(async (req, res) => {
+const server = http.createServer((req, res) => {
+  // Whatever a request contains, the worst it can do is fail on its own.
+  handle(req, res).catch((err) => {
+    log.warn(`Request ${req.method} ${req.url} failed: ${err.stack ?? err}`);
+    if (res.headersSent) return res.destroy();
+    send(res, 500, { error: 'Something went wrong on the server.' });
+  });
+});
+
+async function handle(req, res) {
   const pathname = localPath(req.url);
   if (pathname === null) return send(res, 400, 'Bad request');
 
@@ -173,6 +224,10 @@ const server = http.createServer(async (req, res) => {
     let online = 0;
     for (const room of rooms.rooms.values()) for (const p of room.players.values()) if (p.online && !p.bot) online += 1;
     return send(res, 200, { ok: true, rooms: rooms.rooms.size, online, uptime: Math.round(process.uptime()) });
+  }
+
+  if (pathname === '/admin' || pathname.startsWith('/admin/')) {
+    if (await admin.handle(req, res, pathname)) return;
   }
 
   if (pathname === '/api/rooms' && req.method === 'POST') {
@@ -184,15 +239,20 @@ const server = http.createServer(async (req, res) => {
     }
     const room = rooms.create();
     if (!room) return send(res, 503, { error: 'This server is full. Try again later.' });
-    log.info(`Room created: ${room.code}`);
+    log.info(`Room created: ${room.code} (from ${clientIp(req)})`);
     return send(res, 201, { code: room.code });
   }
 
   const roomInfo = /^\/api\/rooms\/([^/]+)$/.exec(pathname);
   if (roomInfo && req.method === 'GET') {
-    const room = rooms.get(normalizeCode(roomInfo[1]));
+    let asked = roomInfo[1];
+    try {
+      asked = decodeURIComponent(asked);
+    } catch {}
+    const room = rooms.get(normalizeCode(asked));
     if (!room) return send(res, 404, { exists: false });
-    return send(res, 200, { exists: true, players: room.players.size, locked: room.locked });
+    // (`code` is the name the room has now; the one asked for may be an older one.)
+    return send(res, 200, { exists: true, code: room.code, players: room.players.size, locked: room.locked });
   }
   if (pathname.startsWith('/api/')) return send(res, 404, { error: 'Not found.' });
 
@@ -215,11 +275,12 @@ const server = http.createServer(async (req, res) => {
     return send(res, 200, renderIndex(), { 'Content-Type': MIME['.html'], 'Cache-Control': 'no-cache' });
   }
   return serveStatic(req, res, pathname);
-});
+}
 
 // ───────────────────────── WebSocket ─────────────────────────
 
 const wss = new WebSocketServer({ noServer: true, maxPayload: 96 * 1024 });
+const admin = createAdmin({ rooms, sockets: () => wss.clients.size, clientIp, isHttps, send, readJson, securityHeaders: SECURITY_HEADERS });
 
 server.on('upgrade', (req, socket, head) => {
   if (localPath(req.url) !== '/ws') {
@@ -240,6 +301,7 @@ server.on('upgrade', (req, socket, head) => {
 wss.on('connection', (ws, req) => {
   const ip = clientIp(req);
   const origin = String(req.headers.origin ?? '').replace(/\/$/, '').slice(0, 200) || null;
+  const ua = String(req.headers['user-agent'] ?? '').slice(0, 300) || null;
   ws.alive = true;
   ws.budget = config.messageBudget; // messages allowed per 5 seconds
   let room = null;
@@ -258,15 +320,22 @@ wss.on('connection', (ws, req) => {
       return;
     }
     if (!msg || typeof msg !== 'object') return;
+    try {
+      receive(msg);
+    } catch (err) {
+      log.warn(`Message "${text(msg.t)}" failed: ${err.stack ?? err}`);
+    }
+  });
 
+  function receive(msg) {
     if (msg.t === 'hello') {
       if (player) return;
       const found = rooms.get(normalizeCode(msg.room));
       if (!found) return reply({ t: 'fatal', code: 'no-room', m: 'That room does not exist (or it expired).' });
-      const token = String(msg.token ?? '');
+      const token = text(msg.token);
       if (token.length < 16 || token.length > 128) return reply({ t: 'fatal', code: 'bad-token', m: 'Bad session.' });
-      const claim = msg.claim && claimLimit(ip) ? String(msg.claim) : null;
-      const result = rooms.connect(found, { token, name: msg.name, claim, origin }, ws);
+      const claim = text(msg.claim) && claimLimit(ip) ? text(msg.claim) : null;
+      const result = rooms.connect(found, { token, name: msg.name, claim, origin, ip, ua }, ws);
       if (msg.claim) reply({ t: 'claim', ok: Boolean(result.claimed) });
       if (result.error) return reply({ t: 'fatal', code: result.code, m: result.error });
       room = found;
@@ -287,6 +356,7 @@ wss.on('connection', (ws, req) => {
     }
 
     if (msg.t === 'ping') return reply({ t: 'pong', now: Date.now() });
+    if (room?.gone) return; // the room was closed while this message was on its way
 
     if (msg.t === 'a' && player && room) {
       if (!room.players.has(player.id)) return; // kicked
@@ -301,7 +371,7 @@ wss.on('connection', (ws, req) => {
       if (err) reply({ t: 'err', m: err, n: msg.n });
       else if (msg.n != null) reply({ t: 'ack', n: msg.n });
     }
-  });
+  }
 
   ws.on('close', () => {
     if (room && player && room.players.has(player.id)) rooms.disconnect(room, player, ws);
@@ -325,7 +395,7 @@ setInterval(() => {
 setInterval(() => {
   for (const ws of wss.clients) ws.budget = config.messageBudget;
 }, 5_000).unref();
-setInterval(() => rooms.sweep(), 10 * 60_000).unref();
+setInterval(() => rooms.sweep(), 60_000).unref();
 
 // ───────────────────────── start / stop ─────────────────────────
 
@@ -333,6 +403,7 @@ push.loadKeys();
 
 server.listen(config.port, config.host, () => {
   log.info(`${config.siteName} is listening on http://${config.host}:${config.port}${config.basePath || ''}`);
+  log.info(config.adminPassword ? `The admin page is at ${config.basePath}/admin` : 'The admin page is off. Set ADMIN_PASSWORD to turn it on.');
 });
 
 function shutdown(signal) {
@@ -342,5 +413,8 @@ function shutdown(signal) {
   server.close(() => process.exit(0));
   setTimeout(() => process.exit(0), 2000).unref();
 }
+// A slip somewhere must not end everyone's game: note it and carry on.
+process.on('uncaughtException', (err) => log.warn(`Uncaught: ${err.stack ?? err}`));
+process.on('unhandledRejection', (err) => log.warn(`Unhandled: ${err?.stack ?? err}`));
 process.on('SIGTERM', () => shutdown('SIGTERM'));
 process.on('SIGINT', () => shutdown('SIGINT'));

@@ -45,6 +45,7 @@ Swipe is built on the same server as [Tradecraft](https://github.com/au12/tradec
 - One dependency (`ws`). Fonts and card art are bundled. The only outside requests are the notifications themselves, sent to the browser makers' push services.
 - Installable as an app on phones and desktops.
 - Rooms are saved to a JSON file and survive a restart, including the clock. No database.
+- An [admin page](#the-admin-page) at `/admin` shows every room and who is in it, and lets you rename, keep, message or delete them.
 - Works behind a reverse proxy, on a sub-path if you want.
 
 ## How the rules were read
@@ -105,6 +106,7 @@ The repository includes a GitHub Actions workflow ([`.github/workflows/docker-im
    | Extra Parameters | `--user 99:100` |
    | Port | container `3000`, host `3001` (or any free port) |
    | Path | container `/data`, host `/mnt/user/appdata/swipe` |
+   | Variable | `ADMIN_PASSWORD`, a long password of your own, if you want the [admin page](#the-admin-page) |
 
 To update later, push your changes, let the workflow finish, then use **Check for Updates** on the Docker tab.
 
@@ -147,6 +149,33 @@ Messages are encrypted for the one browser they are meant for (RFC 8291) and sig
 
 A seat belongs to a browser. **Room settings → Another browser** shows a code that moves it to a different browser or device: open the room there, choose **Already playing in another browser?** and enter the code. Codes work once and last 15 minutes.
 
+## The admin page
+
+Set `ADMIN_PASSWORD` and restart, then open `/admin` (for example `https://swipe.example.com/admin`) and sign in. Without the variable the page is switched off and says so.
+
+![The admin page: two rooms, one mid-game, with the people in each](docs/admin.png)
+
+**Rooms.** Every room on the server, the ones in use first:
+
+- What it is doing (lobby, dealing, whose turn, between games), when it was last used, when it expires, and its rules.
+- Who is in it: name, whether they are connected and looking at the game, the address they connect from, their device and browser, cards in hand and score, and whether they are the host, a computer player or watching.
+- **Change expiry.** The usual way (`ROOM_TTL_HOURS` after it was last used), never, or on a date and time you pick. A room is never removed while someone is in it; if its time comes then, it goes when the last person leaves.
+- **Rename.** The name is the room's link, so whatever you type is fitted to lower-case letters, numbers and hyphens: "Friday Night Cards!" becomes `friday-night-cards`. Or ask for a new random name. People in the room move with it, and the old link keeps working unless you untick that, which cuts off everyone who only has the old one.
+- **Message** the people in a room; **Lock** it; **End this game** or send it **Back to the lobby**; make someone the host; **Remove** a player (kept out, or free to return); let removed players back in; **Delete** the room, which tells whoever is in it that it was closed.
+- Search by room, player or address. **New room** (named if you like, no server password needed), **Message everyone**, and **Clean up**, which removes empty rooms idle for as long as you choose and leaves alone any whose expiry you set.
+
+**Server.** Version, uptime, memory, where and when rooms were last saved, the limits and settings in force, notification sign-ups, and how the server sees the network. **Save rooms now**, **Download a backup** (the saved rooms as a file; it holds the keys to people's seats, so keep it to yourself) and **Sign out other admin sessions**.
+
+**Activity.** What has happened since the server started: rooms created and expired, every admin sign-in and wrong password with the address it came from, and each change made here.
+
+How it is protected:
+
+- The password is checked on the server, in constant time. Six wrong tries from one address lock that address out for ten minutes; 300 from everywhere lock sign-in for everyone for ten minutes. Use a long password and none of this matters; with a short one it only slows a guesser down.
+- A sign-in is a random token in a cookie that scripts cannot read and other sites cannot send (`HttpOnly`, `SameSite=Strict`, and `Secure` when you arrive over HTTPS). It lasts `ADMIN_SESSION_HOURS` and is held in memory, so restarting the server signs you out.
+- Nothing is changed for a request that another website could make your browser send.
+- Addresses and browsers are kept in memory while someone is connected. They are never written to `rooms.json` or to the backup.
+- Use a different password from `CREATE_PASSWORD`, and reach the page over HTTPS.
+
 ## Configuration
 
 Everything is an environment variable. All are optional.
@@ -158,9 +187,13 @@ Everything is an environment variable. All are optional.
 | `SITE_NAME` | `Swipe` | The name shown on the page and in the browser tab. |
 | `BASE_PATH` | *(empty)* | Set to e.g. `/swipe` to serve under a sub-path. |
 | `CREATE_PASSWORD` | *(empty)* | If set, creating a room needs this password. Joining a room never does. |
+| `ADMIN_PASSWORD` | *(empty)* | Turns on the [admin page](#the-admin-page) at `/admin` and is the password for it. Empty means no admin page. |
+| `ADMIN_SESSION_HOURS` | `12` | How long an admin sign-in lasts. |
+| `TRUST_PROXY` | `1` | How many reverse proxies are in front of the server. It decides which entry of `X-Forwarded-For` is taken as a visitor's address. `0` ignores the header. See [Behind a reverse proxy](#behind-a-reverse-proxy). |
+| `TRUST_PROXY_ANY` | `false` | The proxy's headers are only believed when it connects from a private address. Set to `true` if yours connects from a public one. |
 | `DATA_DIR` | `./data` (`/data` in Docker) | Where `rooms.json` and `vapid.json` are written. |
 | `PERSIST` | `true` | Set to `false` to keep rooms in memory only. |
-| `ROOM_TTL_HOURS` | `48` | Idle rooms are deleted after this long. |
+| `ROOM_TTL_HOURS` | `48` | Idle rooms are deleted after this long, unless the admin page says otherwise for a room. |
 | `MAX_ROOMS` | `500` | Upper limit on rooms. |
 | `MAX_PLAYERS_PER_ROOM` | `64` | Upper limit on people in a room, watchers included. 24 can be dealt in. |
 | `ALLOWED_ORIGINS` | *(any)* | Comma-separated origins allowed to open the WebSocket, e.g. `https://games.example.com`. |
@@ -188,7 +221,9 @@ For a sub-path, set `BASE_PATH=/swipe` and forward `/swipe/` to the app. It work
 
 Notifications and installing need the HTTPS address; see [Notifications and installing](#notifications-and-installing).
 
-If you put this on the public internet, consider setting `CREATE_PASSWORD` so strangers can't open rooms on your server, and `ALLOWED_ORIGINS` to your own address.
+**Visitors' addresses.** The admin page shows where each player connects from, and wrong admin passwords are counted per address. Behind a proxy every connection comes from the proxy, so the server reads `X-Forwarded-For` instead, and `TRUST_PROXY` says how many proxies add to it: `1` for Nginx Proxy Manager, nginx, Caddy or Traefik on their own (the default), `2` with Cloudflare in front of that, `0` with no proxy at all. The header is only believed when the connection comes from a private address (the same machine, a Docker network, your LAN or a VPN), so someone who reaches the app's port directly from outside cannot make one up. If the admin page shows the same address for everybody, the number is too low; if it shows nonsense, too high.
+
+If you put this on the public internet, consider setting `CREATE_PASSWORD` so strangers can't open rooms on your server, and `ALLOWED_ORIGINS` to your own address. If you turn on the admin page, give it a long password: anyone who can reach the site can reach its sign-in form.
 
 ## How it is put together
 
@@ -201,6 +236,8 @@ server/
   game.js     one deal of the cards, as pure functions over a plain object
   push.js     turn notifications: message encryption and signing, written out
               with node:crypto, and the key pair
+  admin.js    the admin page's side of things: sign-in, what it is shown, the
+              changes it may make
   names.js    room codes
   config.js   environment variables
 public/       the client: plain HTML, CSS and ES modules, served as-is
@@ -213,6 +250,7 @@ public/       the client: plain HTML, CSS and ES modules, served as-is
   js/push.js    notifications from the browser's side: permission, subscribing
   js/app.js     the connection, taps, dialogs, and the order things animate in
   sw.js         the service worker: shows notifications, makes the app installable
+  admin/        the admin page: one HTML file, one script, one stylesheet
 test/         rules tests and end-to-end tests over real WebSockets
 ```
 
@@ -223,7 +261,8 @@ The server is the only source of truth. Each change produces a fresh snapshot pe
 | | |
 | --- | --- |
 | `POST /api/rooms` | Create a room. Body `{ "password": "…" }` if `CREATE_PASSWORD` is set. Returns `{ "code": "…" }`. |
-| `GET /api/rooms/:code` | `{ exists, players, locked }`, or 404. |
+| `GET /api/rooms/:code` | `{ exists, code, players, locked }`, or 404. `code` is the room's current name if it was renamed. |
+| `/admin/api/…` | The admin page's own API, all of it behind the sign-in. See the top of [`server/admin.js`](server/admin.js). |
 | `GET /healthz` | `{ ok, rooms, online, uptime }`. |
 | `GET /manifest.webmanifest` | The app manifest. With `?room=…&seat=…` its start address is that room, carrying the seat code. |
 

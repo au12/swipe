@@ -9,6 +9,8 @@ services:
     environment:
       SITE_NAME: Swipe
       # CREATE_PASSWORD: "only-my-friends"   # require this to create rooms
+      # ADMIN_PASSWORD: "a-long-password-of-your-own"   # turns on the admin page at /admin
+      # TRUST_PROXY: "1"                    # proxies in front of this (2 with Cloudflare too, 0 with none)
       # BASE_PATH: /swipe                   # if you serve it under a sub-path
       # ROOM_TTL_HOURS: "48"
     volumes:

@@ -8,7 +8,7 @@ import path from 'node:path';
 import { createHash, randomBytes, randomInt } from 'node:crypto';
 import * as game from './game.js';
 import { config, log } from './config.js';
-import { roomCode } from './names.js';
+import { normalizeCode, roomCode, text } from './names.js';
 import * as push from './push.js';
 import { rankName } from '../public/js/rules.js';
 
@@ -20,6 +20,8 @@ const PILE_BACKS = 16; // how many buried pile cards the browser draws
 const SEAT_CODE_MS = 15 * 60_000; // how long a seat code shown on screen can be used
 const SEAT_LINK_MS = 12 * 3600_000; // and one tucked into a Home Screen link, which may not be opened for a while
 const SEAT_ALPHABET = 'ABCDEFGHJKMNPQRSTVWXYZ23456789'; // nothing that looks like something else
+const MAX_ALIASES = 8; // earlier names a renamed room still answers to
+const NAME_MIN = 3;
 
 // One accent colour per player. The first twelve are the easiest to tell
 // apart, so small tables draw from those before the rest are used.
@@ -34,13 +36,13 @@ const newId = () => randomBytes(6).toString('base64url');
 
 /** "k7qm-2p9x" -> "K7QM2P9X" */
 export const cleanSeatCode = (raw) =>
-  String(raw ?? '')
+  text(raw)
     .toUpperCase()
     .replace(/[^A-Z0-9]/g, '')
     .slice(0, 16);
 
 export function cleanName(raw) {
-  return String(raw ?? '')
+  return text(raw)
     .replace(/[\u0000-\u001f\u007f<>]/g, '')
     .replace(/\s+/g, ' ')
     .trim()
@@ -52,13 +54,17 @@ const defaultSettings = () => ({
   turnSeconds: 0, // 0 = no clock
 });
 
-const live = (room) => Boolean(room.round && room.round.phase !== 'over');
-const humansOnline = (room) => [...room.players.values()].some((p) => p.online && !p.bot);
+export const live = (room) => Boolean(room.round && room.round.phase !== 'over');
+export const humansOnline = (room) => [...room.players.values()].some((p) => p.online && !p.bot);
 const seated = (room) => [...room.players.values()].filter((p) => p.playing).sort((a, b) => a.joinedAt - b.joinedAt);
 
 export class Rooms {
   constructor() {
     this.rooms = new Map();
+    this.aliases = new Map(); // an earlier name of a renamed room -> the name it has now
+    this.report = () => {}; // (kind, detail): the admin page's activity log listens here
+    this.savedAt = null;
+    this.saveError = null;
     this.saveTimer = null;
     this.file = path.join(config.dataDir, 'rooms.json');
     this.sendPush = push.send; // tests swap this for a recorder
@@ -66,15 +72,16 @@ export class Rooms {
 
   // ───────────────────────── lifecycle ─────────────────────────
 
-  create() {
+  create({ quiet = false } = {}) {
     if (this.rooms.size >= config.maxRooms) this.sweep(true);
     if (this.rooms.size >= config.maxRooms) return null;
-    let code = roomCode();
-    while (this.rooms.has(code)) code = roomCode();
+    const code = this.freshCode();
     const room = {
       code,
+      aliases: [],
       createdAt: now(),
       lastActive: now(),
+      expiry: null, // null: the usual time after it was last used. 'never', or a fixed time, when the admin says so.
       hostId: null,
       locked: false,
       settings: defaultSettings(),
@@ -85,11 +92,134 @@ export class Rooms {
     };
     this.rooms.set(code, room);
     this.touch(room);
+    if (!quiet) this.report('room.created', { code });
     return room;
   }
 
+  /** Finds a room by its name, or by a name it used to have. */
   get(code) {
-    return this.rooms.get(code);
+    return this.rooms.get(code) ?? this.rooms.get(this.aliases.get(code));
+  }
+
+  /** A generated name nothing else is using. */
+  freshCode() {
+    let code = roomCode();
+    while (this.rooms.has(code) || this.aliases.has(code)) code = roomCode();
+    return code;
+  }
+
+  /** When this room is due to be removed, or null if it is kept for good. */
+  expiresAt(room) {
+    if (room.expiry === 'never') return null;
+    if (Number.isFinite(room.expiry)) return room.expiry;
+    return room.lastActive + config.roomTtlHours * 3600_000;
+  }
+
+  /**
+   * Sets when a room goes: 'default' (the usual time after it was last used),
+   * 'never', or a fixed time. Returns an error or null.
+   */
+  setExpiry(room, mode, at = null) {
+    if (mode === 'default') {
+      // Back to the usual way, counted from now: a room that sat idle while it
+      // was being kept would otherwise be overdue the moment it was let go.
+      if (room.expiry != null) room.lastActive = now();
+      room.expiry = null;
+    } else if (mode === 'never') room.expiry = 'never';
+    else if (mode === 'at') {
+      const when = typeof at === 'number' ? at : NaN;
+      if (!Number.isFinite(when)) return 'Pick a date and time.';
+      if (when <= now()) return 'That time has already passed. To remove the room now, delete it.';
+      if (when > now() + 3650 * 86400_000) return 'That is more than ten years away. Choose “never” instead.';
+      room.expiry = Math.round(when);
+    } else return 'Unknown setting.';
+    this.scheduleSave();
+    return null;
+  }
+
+  /**
+   * Gives a room a new name, which is also its link. Anything can be typed:
+   * it is turned into lower-case letters, numbers and hyphens. Unless
+   * `keepOld` is off, the names it had before keep leading to it. Returns
+   * { code } or { error }.
+   */
+  rename(room, raw, { keepOld = true } = {}) {
+    if (room.gone) return { error: 'That room is no longer here.' };
+    const code = normalizeCode(raw);
+    if (code.length < NAME_MIN) return { error: `A room name needs at least ${NAME_MIN} letters or numbers.` };
+    if (code === room.code) return { error: 'That is already this room’s name.' };
+    const owner = this.get(code);
+    if (owner && owner !== room) return { error: 'Another room is using that name.' };
+
+    const old = room.code;
+    this.rooms.delete(old);
+    let aliases = (room.aliases ?? []).filter((a) => a !== code);
+    for (const a of room.aliases ?? []) this.aliases.delete(a);
+    aliases = keepOld ? [...aliases, old].slice(-MAX_ALIASES) : [];
+    room.aliases = aliases;
+    room.code = code;
+    this.rooms.set(code, room);
+    for (const a of aliases) this.aliases.set(a, code);
+    this.scheduleSave();
+    this.broadcast(room); // open tabs follow the room to its new address
+    return { code, old };
+  }
+
+  /** Takes a room off the server. Anyone in it is told why, if `notice` says. */
+  remove(room, { notice = null, why = 'removed' } = {}) {
+    if (this.rooms.get(room.code) !== room) return false;
+    clearTimeout(room.timer);
+    clearTimeout(room.botTimer);
+    room.timer = null;
+    room.botTimer = null;
+    room.gone = true;
+    this.rooms.delete(room.code);
+    for (const a of room.aliases ?? []) this.aliases.delete(a);
+    for (const p of room.players.values()) {
+      for (const socket of p.sockets) {
+        try {
+          if (notice) socket.send(JSON.stringify({ t: 'fatal', code: 'closed', m: notice }));
+          socket.close(4004, 'room closed');
+        } catch {}
+      }
+      p.sockets = new Set();
+    }
+    this.report('room.removed', { code: room.code, why });
+    this.scheduleSave();
+    return true;
+  }
+
+  /** Shows a short message to everyone who has the room open. Returns how many people saw it. */
+  announce(room, message) {
+    const payload = JSON.stringify({ t: 'note', m: text(message).slice(0, 280) });
+    let reached = 0;
+    for (const p of room.players.values()) {
+      let got = false;
+      for (const socket of p.sockets) {
+        if (socket.readyState !== 1) continue;
+        socket.send(payload);
+        got = true;
+      }
+      if (got) reached += 1;
+    }
+    return reached;
+  }
+
+  /** Takes a player out of the room. With `ban`, their browser cannot walk back in. */
+  kick(room, p, { ban = true } = {}) {
+    if (ban && p.token) room.banned.push(p.token);
+    this.unseat(room, p);
+    room.players.delete(p.id);
+    for (const socket of p.sockets) {
+      try {
+        socket.send(JSON.stringify({ t: 'kicked' }));
+        socket.close(4001, 'kicked');
+      } catch {}
+    }
+    if (room.hostId === p.id) {
+      room.hostId = null;
+      this.ensureHost(room);
+    }
   }
 
   touch(room) {
@@ -97,16 +227,20 @@ export class Rooms {
     this.scheduleSave();
   }
 
-  /** Drop rooms nobody has used for a while. */
+  /**
+   * Drop rooms whose time is up. A room is never removed while someone is in
+   * it: it goes as soon as it empties. When the server is full (`aggressive`),
+   * rooms idle for an hour go too, unless the admin has set their expiry.
+   */
   sweep(aggressive = false) {
-    const ttl = config.roomTtlHours * 3600_000;
-    for (const room of this.rooms.values()) {
+    let changed = false;
+    for (const room of [...this.rooms.values()]) {
       const online = humansOnline(room);
       const idle = now() - room.lastActive;
-      if (!online && (idle > ttl || (aggressive && idle > 3600_000))) {
-        clearTimeout(room.timer);
-        clearTimeout(room.botTimer);
-        this.rooms.delete(room.code);
+      const at = this.expiresAt(room);
+      const due = at != null && now() > at;
+      if (!online && (due || (aggressive && room.expiry == null && idle > 3600_000))) {
+        this.remove(room, { why: due ? 'expired' : 'made room' });
         log.debug(`Removed idle room ${room.code}`);
         continue;
       }
@@ -117,10 +251,11 @@ export class Rooms {
         if (now() - p.seenAt > (inMatch.has(p.id) ? 6 : 1) * 3600_000) {
           if (inMatch.has(p.id)) this.unseat(room, p);
           room.players.delete(p.id);
+          changed = true;
         }
       }
     }
-    this.scheduleSave();
+    if (changed) this.scheduleSave();
   }
 
   // ───────────────────────── connections ─────────────────────────
@@ -135,7 +270,7 @@ export class Rooms {
   }
 
   /** Returns { player } or { error, code }. */
-  connect(room, { token, name, claim = null, origin = null }, socket) {
+  connect(room, { token, name, claim = null, origin = null, ip = null, ua = null }, socket) {
     if (room.banned.includes(token)) return { code: 'banned', error: 'The host removed you from this room.' };
     // A seat code moves someone's seat to this browser before anything else happens.
     const claimed = claim ? this.claimSeat(room, token, claim) : null;
@@ -165,6 +300,11 @@ export class Rooms {
       player.name = this.freeName(room, cleanName(name), player.id);
     }
     if (origin) player.origin = origin;
+    // Where this player is connecting from: shown on the admin page, kept in memory only.
+    socket.ip = ip;
+    socket.ua = ua;
+    if (ip) player.ip = ip;
+    if (ua) player.ua = ua;
     socket.visible = true;
     player.sockets.add(socket);
     player.online = true;
@@ -278,7 +418,7 @@ export class Rooms {
     if (!config.push || !r || r.phase !== 'play' || !player.push) return;
     if (game.current(r) !== player.id || r.pushedTo === player.id) return;
     const timer = setTimeout(() => {
-      if (room.round !== r || r.phase !== 'play' || game.current(r) !== player.id || r.pushedTo === player.id) return;
+      if (room.gone || room.round !== r || r.phase !== 'play' || game.current(r) !== player.id || r.pushedTo === player.id) return;
       this.pushTurn(room, r, player, { reminder: true });
     }, config.pushRemindMs);
     timer.unref?.();
@@ -331,6 +471,7 @@ export class Rooms {
 
   disconnect(room, player, socket) {
     player.sockets.delete(socket);
+    if (room.gone) return;
     if (!this.watching(player)) this.lookedAway(room, player);
     if (player.sockets.size > 0) return;
     player.online = false;
@@ -715,10 +856,11 @@ export class Rooms {
 
   /** Handles one message from a player. Returns an error string or null. */
   act(room, me, msg) {
+    if (room.gone) return 'This room has been closed.';
     const isHost = me.id === room.hostId;
     const hostOnly = () => (isHost ? null : 'Only the host can do that.');
     const r = room.round;
-    const target = () => room.players.get(String(msg.id ?? ''));
+    const target = () => room.players.get(text(msg.id));
     let err = null;
 
     switch (msg.a) {
@@ -819,17 +961,7 @@ export class Rooms {
         err = hostOnly();
         const p = target();
         if (!err && (!p || p.id === me.id)) err = 'You can’t remove that player.';
-        if (!err) {
-          if (p.token) room.banned.push(p.token);
-          this.unseat(room, p);
-          room.players.delete(p.id);
-          for (const socket of p.sockets) {
-            try {
-              socket.send(JSON.stringify({ t: 'kicked' }));
-              socket.close(4001, 'kicked');
-            } catch {}
-          }
-        }
+        if (!err) this.kick(room, p);
         break;
       }
       case 'pause': {
@@ -878,10 +1010,11 @@ export class Rooms {
 
   serialize() {
     return [...this.rooms.values()].map((room) => {
-      const { players, timer, botTimer, ...rest } = room;
+      const { players, timer, botTimer, gone, ...rest } = room;
       return {
         ...rest,
-        players: [...players.values()].map(({ sockets, ...p }) => ({ ...p, online: Boolean(p.bot) })),
+        // (Addresses and browsers are for the admin page while someone is connected. They are not written to disk.)
+        players: [...players.values()].map(({ sockets, ip, ua, ...p }) => ({ ...p, online: Boolean(p.bot) })),
       };
     });
   }
@@ -893,7 +1026,10 @@ export class Rooms {
       const tmp = `${this.file}.tmp`;
       fs.writeFileSync(tmp, JSON.stringify({ version: 1, savedAt: now(), rooms: this.serialize() }));
       fs.renameSync(tmp, this.file);
+      this.savedAt = now();
+      this.saveError = null;
     } catch (err) {
+      this.saveError = err.message;
       log.warn(`Could not save rooms: ${err.message}`);
     }
   }
@@ -906,11 +1042,18 @@ export class Rooms {
     } catch {
       return;
     }
-    const ttl = config.roomTtlHours * 3600_000;
     for (const saved of data.rooms ?? []) {
-      if (now() - saved.lastActive > ttl) continue;
+      // A room past its time is not brought back, with one exception: a room
+      // with a date that was in use when the server stopped. Nobody is removed
+      // from a room they are in, so it returns, and goes once it is empty.
+      const due = this.expiresAt(saved);
+      const inUseAtStop = Number.isFinite(saved.expiry) && (data.savedAt ?? 0) - saved.lastActive < 10 * 60_000;
+      if (due != null && now() > due && !inUseAtStop) continue;
+      if (this.rooms.has(saved.code)) continue;
       const room = {
         ...saved,
+        expiry: saved.expiry ?? null,
+        aliases: (saved.aliases ?? []).filter((a) => typeof a === 'string' && a !== saved.code),
         settings: { ...defaultSettings(), ...saved.settings },
         players: new Map(saved.players.map((p) => [p.id, { ...p, online: Boolean(p.bot), sockets: new Set() }])),
       };
@@ -924,6 +1067,12 @@ export class Rooms {
       this.rooms.set(room.code, room);
       this.syncTimer(room);
     }
+    // Earlier names, unless something else has since taken them.
+    for (const room of this.rooms.values()) {
+      room.aliases = room.aliases.filter((a) => !this.rooms.has(a) && !this.aliases.has(a));
+      for (const a of room.aliases) this.aliases.set(a, room.code);
+    }
+    this.savedAt = data.savedAt ?? null;
     log.info(`Restored ${this.rooms.size} rooms from disk`);
   }
 }

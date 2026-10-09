@@ -11,8 +11,15 @@ export function roomCode() {
   return `${pick(ADJECTIVES)}-${pick(NOUNS)}-${String(randomInt(100)).padStart(2, '0')}`;
 }
 
+/**
+ * Text that arrived from outside, as a string. Anything that is not a string
+ * or a number counts as empty: String() throws on an object such as
+ * {"toString":1}, and one bad message must never take the server down.
+ */
+export const text = (raw) => (typeof raw === 'string' ? raw : typeof raw === 'number' ? String(raw) : '');
+
 export function normalizeCode(raw) {
-  return String(raw ?? '')
+  return text(raw)
     .toLowerCase()
     .trim()
     .replace(/[\s_]+/g, '-')

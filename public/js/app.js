@@ -316,6 +316,17 @@ function enterRoom(code) {
     .catch(() => askName());
 }
 
+/**
+ * The room was given a new name (or this link used an old one). The address
+ * bar, the reconnect and the Home Screen link all move to the name it has now.
+ */
+function followRename(code) {
+  if (!code || code === currentRoomCode()) return;
+  if (conn) conn.room = code;
+  history.replaceState(null, '', api(`r/${encodeURIComponent(code)}`));
+  if (push.isIOS() && !push.standalone()) carrySeat();
+}
+
 const homeLink = () => `<a class="btn" href="${esc(api('.'))}">Go to the home page</a>`;
 
 function roomMissing() {
@@ -347,6 +358,11 @@ function connect(code, name, claim = null) {
       if (state) renderActions(state, me, ui);
     },
     onStatus: (up) => ($('#conn-banner').hidden = up),
+    // A message from whoever runs the server: long enough on screen to read twice.
+    onNote: (message) => {
+      sfx('join');
+      toast(String(message), { hold: Math.min(15000, 6000 + String(message).length * 45) });
+    },
     onFatal: (kind, message) => {
       const home = homeLink();
       // Whatever was open belongs to a room this browser is no longer in.
@@ -355,6 +371,7 @@ function connect(code, name, claim = null) {
       if (kind === 'no-room') return roomMissing();
       if (kind === 'locked') return notice('This room is locked', 'Ask the host to unlock it, then reload this page.', `<button class="btn btn-primary" data-act="reload">Try again</button>${home}`);
       if (kind === 'full') return notice('This room is full', message, home);
+      if (kind === 'closed') return notice('This room has been closed', 'It was closed by the person who runs this server. Scores from this room are gone.', `<button class="btn btn-primary" data-act="create-from-notice">Create a new room</button>${home}`);
       if (kind === 'moved') return notice('Your seat has moved', 'This game is now open in another browser, with your cards and your score. To come back here, ask for a seat code there.', home);
       return notice('You’re out of this room', message, home);
     },
@@ -423,6 +440,7 @@ function commit(next, { dealing = false } = {}) {
   // A seat that arrived by code brings its name with it.
   if (!store.get('name')) store.set('name', me.name);
   if (store.get('room') !== next.code) store.set('room', next.code);
+  followRename(next.code);
 
   const r = next.round;
   // Keep only selections that are still playable; a flipped blind card is always in.

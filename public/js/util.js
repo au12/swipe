@@ -97,7 +97,7 @@ export const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 export const reducedMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 const toastTimer = new Map();
-export function toast(message, { error = false } = {}) {
+export function toast(message, { error = false, hold = 0 } = {}) {
   const host = $('#toasts');
   // Don't stack identical messages.
   for (const el of host.children) if (el.textContent === message) el.remove();
@@ -107,7 +107,7 @@ export function toast(message, { error = false } = {}) {
   host.append(el);
   toastTimer.set(
     el,
-    setTimeout(() => el.remove(), error ? 5000 : 2600),
+    setTimeout(() => el.remove(), hold || (error ? 5000 : 2600)),
   );
   while (host.children.length > 3) host.firstElementChild.remove();
 }

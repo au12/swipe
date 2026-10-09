@@ -30,6 +30,19 @@ export const config = {
   persist: env.PERSIST !== 'false',
   // If set, people must enter this to create a room. Joining is never gated.
   createPassword: env.CREATE_PASSWORD || '',
+  // The admin page at /admin. Left empty, the page is switched off.
+  adminPassword: env.ADMIN_PASSWORD || '',
+  // How long an admin sign-in lasts.
+  adminSessionHours: int('ADMIN_SESSION_HOURS', 12, 1, 24 * 30),
+  // How many reverse proxies sit in front of this server (Nginx Proxy Manager
+  // counts as one, Cloudflare in front of it makes two). It decides which
+  // entry of X-Forwarded-For is believed as a visitor's address. 0 = none:
+  // the header is ignored and the connection's own address is used.
+  trustProxy: int('TRUST_PROXY', 1, 0, 10),
+  // The proxy's word is only taken when it connects from a private address
+  // (the same machine, Docker, your LAN, a VPN). Set this if yours reaches the
+  // server from a public one.
+  trustAnyProxy: env.TRUST_PROXY_ANY === 'true',
   roomTtlHours: int('ROOM_TTL_HOURS', 48, 1, 24 * 90),
   maxRooms: int('MAX_ROOMS', 500, 1, 100000),
   maxPlayers: int('MAX_PLAYERS_PER_ROOM', 64, 2, 256),

@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <base href="{{BASE}}">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Admin | {{SITE_NAME}}</title>
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="theme-color" content="#1a1714">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="preload" href="fonts/archivo-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="css/style.css">
+  <link rel="stylesheet" href="admin/admin.css">
+  <script src="js/theme.js"></script>
+  <script type="module" src="admin/admin.js"></script>
+</head>
+<body class="admin">
+  <noscript><p class="noscript">The admin page needs JavaScript turned on.</p></noscript>
+
+  <!-- ───────────── Signed out ───────────── -->
+  <main id="gate" class="gate" hidden>
+    <a class="bar-brand" href="." aria-label="{{SITE_NAME}} home">
+      <span class="mark" aria-hidden="true"><i></i><i></i><i><svg viewBox="-50 -50 100 100"><path d="M0-44C12-26 42-9 42 13c0 13-10 22-21 22-8 0-14-4-18-10 1 9 5 17 12 22h-30c7-5 11-13 12-22-4 6-10 10-18 10-11 0-21-9-21-22C-42-9-12-26 0-44z"/></svg></i></span>
+      <span class="bar-name">{{SITE_NAME}}</span>
+    </a>
+    <form id="login-form" class="gate-form" hidden>
+      <h1>Admin</h1>
+      <label class="field">
+        <span>Admin password</span>
+        <input id="login-password" type="password" autocomplete="current-password" maxlength="200" required>
+      </label>
+      <p class="gate-error" id="login-error" role="alert" hidden></p>
+      <button class="btn btn-primary btn-large" type="submit" id="login-submit">Sign in</button>
+    </form>
+    <div id="gate-off" class="gate-form" hidden>
+      <h1>The admin page is off</h1>
+      <p>Set an admin password on the server and restart it. In <code>docker-compose.yml</code>, or the container’s variables in Unraid:</p>
+      <pre><code>ADMIN_PASSWORD=a-long-password-of-your-own</code></pre>
+      <p class="muted">Anyone who can reach this site can reach this page, so make it a long one.</p>
+    </div>
+  </main>
+
+  <!-- ───────────── Signed in ───────────── -->
+  <div id="desk" class="desk" hidden>
+    <header class="bar">
+      <a class="bar-brand" href="." aria-label="{{SITE_NAME}} home">
+        <span class="mark" aria-hidden="true"><i></i><i></i><i><svg viewBox="-50 -50 100 100"><path d="M0-44C12-26 42-9 42 13c0 13-10 22-21 22-8 0-14-4-18-10 1 9 5 17 12 22h-30c7-5 11-13 12-22-4 6-10 10-18 10-11 0-21-9-21-22C-42-9-12-26 0-44z"/></svg></i></span>
+        <span class="bar-name">{{SITE_NAME}}</span>
+      </a>
+      <span class="desk-tag">Admin</span>
+      <div class="bar-tools">
+        <span class="desk-fresh" id="fresh" aria-live="off"></span>
+        <button class="tool tool-theme" type="button" data-act="theme" title="Light or dark"><span data-icon="theme"></span><span class="sr">Switch light or dark</span></button>
+        <button class="btn btn-small" type="button" data-act="signout">Sign out</button>
+      </div>
+    </header>
+
+    <div class="banner" id="lost" hidden>Can’t reach the server. Trying again…</div>
+
+    <div class="desk-body">
+      <dl class="tally" id="tally" aria-label="Right now"></dl>
+
+      <nav class="tabs" role="tablist" aria-label="Sections">
+        <button type="button" role="tab" data-tab="rooms" aria-controls="tab-rooms">Rooms</button>
+        <button type="button" role="tab" data-tab="server" aria-controls="tab-server">Server</button>
+        <button type="button" role="tab" data-tab="log" aria-controls="tab-log">Activity</button>
+      </nav>
+
+      <section id="tab-rooms" role="tabpanel" hidden>
+        <div class="roombar">
+          <label class="sr" for="room-search">Find a room</label>
+          <input id="room-search" type="search" placeholder="Find a room, a player or an address" autocomplete="off" spellcheck="false">
+          <label class="sr" for="room-filter">Show</label>
+          <select id="room-filter">
+            <option value="all">All rooms</option>
+            <option value="used">In use now</option>
+            <option value="empty">Nobody in them</option>
+            <option value="kept">Expiry set by you</option>
+          </select>
+          <span class="roombar-gap"></span>
+          <button class="btn btn-small" type="button" data-act="message-all">Message everyone</button>
+          <button class="btn btn-small" type="button" data-act="cleanup">Clean up</button>
+          <button class="btn btn-small btn-primary" type="button" data-act="create">New room</button>
+        </div>
+        <div id="rooms" class="rooms"></div>
+      </section>
+
+      <section id="tab-server" role="tabpanel" hidden>
+        <div class="serverbar">
+          <button class="btn btn-small" type="button" data-act="save">Save rooms now</button>
+          <a class="btn btn-small" href="admin/api/backup" download title="Every room as it is saved. It holds the keys to people’s seats, so keep the file to yourself.">Download a backup</a>
+          <button class="btn btn-small" type="button" data-act="signout-others">Sign out other admin sessions</button>
+        </div>
+        <div id="server" class="facts"></div>
+      </section>
+
+      <section id="tab-log" role="tabpanel" hidden>
+        <p class="muted log-note">The last things that happened, newest first. This list is kept in memory and starts again when the server restarts.</p>
+        <ol id="log" class="events"></ol>
+      </section>
+    </div>
+  </div>
+
+  <!-- ───────────── Dialogs ───────────── -->
+  <dialog id="dlg" class="dialog dialog-small">
+    <form method="dialog" id="dlg-form">
+      <h2 id="dlg-title"></h2>
+      <div id="dlg-body"></div>
+      <p class="gate-error" id="dlg-error" role="alert" hidden></p>
+      <div class="dialog-actions">
+        <button class="btn" type="button" data-close>Cancel</button>
+        <button class="btn btn-primary" type="submit" id="dlg-ok"></button>
+      </div>
+    </form>
+  </dialog>
+
+  <div class="toasts" id="toasts" role="status" aria-live="polite"></div>
+</body>
+</html>
