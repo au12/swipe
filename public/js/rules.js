@@ -57,8 +57,12 @@ export function judge(top, rank, n) {
   if (n > SET_MAX) return fail('A set is four cards at most.');
   if (!(rank in RANK_NAMES)) return fail('That is not a card.');
 
-  // Tens go on anything, at any time, and always swipe.
-  if (rank === TEN) return { ok: true, effect: 'swipe', swipe: 'ten', again: true };
+  // Tens go on anything, at any time, and always swipe. One is all it takes,
+  // so one is all that may be played; the extra turn is there for the next.
+  if (rank === TEN) {
+    if (n > 1) return fail('Tens go down one at a time. Play one, then another on your extra turn.');
+    return { ok: true, effect: 'swipe', swipe: 'ten', again: true };
+  }
 
   const topRank = top?.rank ?? null;
   const run = top?.run ?? 0;

@@ -46,16 +46,36 @@ export function fly(el, from, to, { duration = 340, delay = 0, rot0 = 0, lift = 
   if (lift) frames.push({ transform: `translate(${dx * 0.5}px,${dy * 0.5 - lift}px) rotate(${(rot0 + rot1) / 2}deg) scale(${((1 + s) / 2) * 1.1})`, opacity: 1, offset: 0.5 });
   frames.push({ transform: `translate(${dx}px,${dy}px) rotate(${rot1}deg) scale(${s})`, opacity: fade ? 0 : 1 });
   const opts = { duration: duration * speed(), delay: delay * speed(), easing, fill: 'both' };
-  if (flip) {
-    el.querySelector('.flip-in')?.animate([{ transform: 'rotateY(180deg)' }, { transform: 'rotateY(0deg)' }], { ...opts, easing: 'ease-in-out' });
-  }
+  if (flip) turnOver(el, opts);
   return el.animate(frames, opts).finished.catch(() => {});
+}
+
+/**
+ * Turns a two-sided card (cards.js flipHTML) from face down to face up, the
+ * way a real card turns: the back swings away, and at the moment the card is
+ * edge-on the face takes its place and swings in. The face is part of the
+ * card for the whole turn; it is simply the side you cannot see until then.
+ * `timing` carries duration and delay; until the delay is over the card just
+ * lies face down.
+ */
+function turnOver(el, timing) {
+  const inner = el.querySelector('.flip-in');
+  if (!inner) return;
+  const { duration, delay = 0 } = timing;
+  // A symmetric ease, so the card is exactly edge-on at half time.
+  const turn = { duration, delay, fill: 'both', easing: 'cubic-bezier(.42,0,.58,1)' };
+  const swap = { duration, delay, fill: 'both', easing: 'linear' };
+  const done = inner.animate([{ transform: 'rotateY(180deg)' }, { transform: 'rotateY(0deg)' }], turn);
+  inner.querySelector('.flip-back')?.animate([{ opacity: 1, offset: 0 }, { opacity: 1, offset: 0.5 }, { opacity: 0, offset: 0.5 }, { opacity: 0, offset: 1 }], swap);
+  inner.querySelector('.flip-face')?.animate([{ opacity: 0, offset: 0 }, { opacity: 0, offset: 0.5 }, { opacity: 1, offset: 0.5 }, { opacity: 1, offset: 1 }], swap);
+  // Once it has turned, face up is simply what it is.
+  done.finished.then(() => inner.parentElement.classList.add('is-up')).catch(() => {});
 }
 
 /** Turns a two-sided ghost over where it lies, lifting it a little as it goes. */
 export function flipInPlace(el, { duration = 460 } = {}) {
   const opts = { duration: duration * speed(), easing: 'ease-in-out', fill: 'both' };
-  el.querySelector('.flip-in')?.animate([{ transform: 'rotateY(180deg)' }, { transform: 'rotateY(0deg)' }], opts);
+  turnOver(el, opts);
   return el
     .animate([{ transform: 'scale(1)' }, { transform: 'scale(1.22) translateY(-8%)', offset: 0.5 }, { transform: 'scale(1)' }], opts)
     .finished.catch(() => {});

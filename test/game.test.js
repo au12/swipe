@@ -82,6 +82,8 @@ test('judge: equal or lower goes on, higher picks up, tens and fours swipe', () 
 
   assert.deepEqual(on(['7'], '10', 1), { ok: true, effect: 'swipe', swipe: 'ten', again: true });
   assert.equal(on([], '10', 1).effect, 'swipe', 'a ten goes on anything, even nothing');
+  assert.match(on(['7'], '10', 2).error, /one at a time/);
+  assert.equal(on([], '10', 4).ok, false, 'not even four tens together');
   assert.deepEqual(on(['9'], '5', 4), { ok: true, effect: 'swipe', swipe: 'four', again: true });
   assert.deepEqual(on([], 'Q', 4), { ok: true, effect: 'swipe', swipe: 'four', again: true });
   assert.deepEqual(on(['5'], '9', 4), { ok: true, effect: 'swipe', swipe: 'four', again: false }, 'four higher: swipe, but the turn ends');
@@ -272,7 +274,40 @@ test('the auto player always finds a legal move and prefers not to take the pile
   assert.deepEqual(game.autoMove(r, 'a').ids, ids(r, 'a', 'Q'), 'otherwise leads the new pile with its highest card');
 
   r = table({ a: { hand: ['10', '10'], up: [], blind: [] }, pile: ['2'] });
-  assert.equal(game.autoMove(r, 'a').ids.length, 2, 'plays every ten when that goes out');
+  assert.equal(game.autoMove(r, 'a').ids.length, 1, 'tens go one at a time, even when they are all that is left');
+});
+
+test('tens are played singly, one per turn, as many turns as you have tens', () => {
+  const r = table({ a: { hand: ['10', '10', '4'], up: ['10', null, null, null] }, pile: ['3', '5'] });
+  const tens = [...ids(r, 'a', '10', 2), r.seats.a.up[0].id];
+  assert.match(game.play(r, 'a', tens.slice(0, 2)).error, /one at a time/);
+  assert.match(game.play(r, 'a', [tens[0], tens[2]]).error, /one at a time/, 'hand and table tens cannot be paired either');
+  assert.equal(r.pile.length, 2, 'nothing moved');
+  for (const id of tens) {
+    const res = game.play(r, 'a', [id]);
+    assert.equal(res.effect, 'swipe');
+    assert.equal(game.current(r), 'a', 'each ten earns another turn');
+  }
+  assert.equal(r.burned, 2 + 3);
+});
+
+test('a flipped ten is recognised so it can be played without asking', () => {
+  const r = table({ a: { hand: ['10', '2'], up: [null, null, '4', '4'], blind: ['10', '6', '5', '5'] }, pile: ['3', '5', 'A'] });
+  assert.equal(game.flippedTen(r), null);
+  game.flip(r, 'a', 1);
+  assert.equal(game.flippedTen(r), null, 'a six is not a ten');
+  assert.equal(game.playFlippedTen(r).ok, false);
+  game.play(r, 'a', [r.seats.a.blind[1].id]); // six on an ace: picks up, turn passes
+  r.turn = 0;
+  game.flip(r, 'a', 0);
+  assert.equal(game.flippedTen(r).r, '10');
+  const res = game.playFlippedTen(r);
+  assert.equal(res.effect, 'swipe');
+  assert.equal(r.pending, null);
+  assert.equal(r.seats.a.blind[0], null);
+  assert.equal(r.seats.a.hand.filter((c) => c.r === '10').length, 1, 'the ten in hand stays there');
+  assert.equal(game.current(r), 'a');
+  assert.equal(r.pile.length, 0);
 });
 
 test('auto players can always finish a game, from two at the table to six', () => {

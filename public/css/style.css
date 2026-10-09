@@ -110,8 +110,12 @@ button:disabled { cursor: default; }
   -webkit-user-select: none; user-select: none;
 }
 .card > svg { position: absolute; inset: 0; width: 100%; height: 100%; display: block; border-radius: inherit; pointer-events: none; }
-.card .idx text { font-family: var(--serif); font-weight: 800; font-size: 60px; }
-.card .idx text.ten { font-size: 50px; letter-spacing: -5px; }
+/* Besley's tabular-figure feature points at glyphs this font file doesn't
+   carry, which sent the zero to a fallback font. Everything set in Besley
+   therefore asks for its ordinary figures (font-variant-numeric: normal). */
+.card .idx text { font-family: var(--serif); font-variant-numeric: normal; font-weight: 800; font-size: 60px; }
+/* The ten is the only two-character index: same height as the rest, drawn narrower and a touch heavier so its strokes match. */
+.card .idx text.ten { font-weight: 900; letter-spacing: -1.5px; }
 .card.back { background-size: 100% 100%; background-repeat: no-repeat; }
 .card.b0 { background-image: url('../img/back-red.svg'); }
 .card.b1 { background-image: url('../img/back-blue.svg'); }
@@ -134,11 +138,21 @@ button:disabled { cursor: default; }
 }
 @keyframes glint { 0%, 62% { background-position: 130% 0; } 100% { background-position: -70% 0; } }
 
-/* Two-sided cards, for turning over in mid-air. */
+/* Two-sided cards, for turning over in mid-air.
+   A flipper is face DOWN by its own styles, before and without any animation:
+   it sits turned half way round with its face switched off. Turning it over
+   (fx.js) rotates it to the front and swaps which side is drawn at the moment
+   it is edge-on, then `.is-up` makes that the resting state. Nothing here
+   leans on backface-visibility or on an animation's delay phase holding its
+   first frame, both of which some browsers get wrong — which is how a face
+   used to show for an instant before its card had turned. */
 .card.flipper { background: none; box-shadow: none; perspective: 800px; width: 100%; height: 100%; }
-.flip-in { position: absolute; inset: 0; transform-style: preserve-3d; }
-.flip-in > .card { position: absolute; inset: 0; width: 100%; height: 100%; backface-visibility: hidden; -webkit-backface-visibility: hidden; }
-.flip-in > .flip-back { transform: rotateY(180deg); }
+.flip-in { position: absolute; inset: 0; transform: rotateY(180deg); }
+.flip-in > .card { position: absolute; inset: 0; width: 100%; height: 100%; }
+.flip-in > .flip-face { opacity: 0; }
+.flipper.is-up > .flip-in { transform: none; }
+.flipper.is-up > .flip-in > .flip-face { opacity: 1; }
+.flipper.is-up > .flip-in > .flip-back { opacity: 0; }
 
 /* ───────────── Controls ───────────── */
 
@@ -313,7 +327,7 @@ input:focus-visible, textarea:focus-visible, select:focus-visible { outline-offs
 .timer-value {
   min-width: 4.2ch; padding: 3px 10px; border-radius: var(--r-ui);
   background: rgba(0, 0, 0, 0.4); color: #fff;
-  font-family: var(--serif); font-weight: 800; font-size: 1.2rem; text-align: center; line-height: 1.35;
+  font-family: var(--serif); font-variant-numeric: normal; font-weight: 800; font-size: 1.2rem; text-align: center; line-height: 1.35;
 }
 .timer.is-low .timer-value { background: #fff; color: #b3141d; animation: pulse 1s ease-in-out infinite; }
 .timer.is-paused .timer-value { background: transparent; outline: 1.5px dashed rgba(255, 255, 255, 0.5); outline-offset: -1.5px; }
@@ -340,7 +354,7 @@ input:focus-visible, textarea:focus-visible, select:focus-visible { outline-offs
 .zone-foot, .zone-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; min-height: 34px; }
 .zone-foot { justify-content: center; gap: 6px 14px; }
 .zone-label { display: inline-flex; align-items: center; font-weight: 650; font-size: 0.95rem; }
-.zone-n { margin-left: 8px; padding: 0 8px; border-radius: 999px; background: color-mix(in srgb, var(--ink) 13%, transparent); font-family: var(--serif); font-weight: 800; font-size: 0.9rem; line-height: 1.5; }
+.zone-n { margin-left: 8px; padding: 0 8px; border-radius: 999px; background: color-mix(in srgb, var(--ink) 13%, transparent); font-family: var(--serif); font-variant-numeric: normal; font-weight: 800; font-size: 0.9rem; line-height: 1.5; }
 
 /* The pile. */
 .pilezone { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: clamp(8px, 3vw, 22px); }
@@ -363,13 +377,13 @@ input:focus-visible, textarea:focus-visible, select:focus-visible { outline-offs
 .pile-side { display: grid; gap: 6px; justify-items: start; align-content: center; min-width: 0; }
 .pile-side-left { justify-items: end; text-align: right; }
 .pile-count { display: inline-grid; justify-items: center; padding: 5px 12px 6px; border-radius: 12px; background: rgba(0, 0, 0, 0.3); border: 1.5px solid rgba(255, 255, 255, 0.26); }
-.pile-count b { font-family: var(--serif); font-weight: 800; font-size: clamp(1.5rem, 6vw, 2.1rem); line-height: 1.05; }
+.pile-count b { font-family: var(--serif); font-variant-numeric: normal; font-weight: 800; font-size: clamp(1.5rem, 6vw, 2.1rem); line-height: 1.05; }
 .pile-count span { font-size: 0.74rem; font-weight: 600; opacity: 0.88; white-space: nowrap; }
 .pile-rule { font-weight: 800; font-stretch: 78%; font-size: clamp(0.98rem, 4vw, 1.2rem); line-height: 1.1; }
 .pile-rule small { display: block; font-weight: 500; font-stretch: 100%; font-size: 0.8rem; opacity: 0.82; margin-top: 2px; }
 .pile-more { font-size: 0.8rem; font-weight: 650; padding: 2px 8px; border-radius: 6px; background: #fffaf0; color: #1d1915; }
 .pile-burned { display: grid; justify-items: end; opacity: 0.86; }
-.pile-burned b { font-family: var(--serif); font-weight: 800; font-size: 1.15rem; line-height: 1.1; }
+.pile-burned b { font-family: var(--serif); font-variant-numeric: normal; font-weight: 800; font-size: 1.15rem; line-height: 1.1; }
 .pile-burned span { font-size: 0.74rem; font-weight: 600; }
 
 /* ───────────── Turn order ───────────── */
@@ -381,7 +395,7 @@ input:focus-visible, textarea:focus-visible, select:focus-visible { outline-offs
   border: 1.5px solid var(--line); border-radius: 999px; background: var(--panel); color: var(--ink);
   transition: background-color 0.2s, border-color 0.2s;
 }
-.seatchip-n { font-family: var(--serif); font-weight: 800; font-size: 0.95rem; min-width: 1.2ch; text-align: center; }
+.seatchip-n { font-family: var(--serif); font-variant-numeric: normal; font-weight: 800; font-size: 0.95rem; min-width: 1.2ch; text-align: center; }
 .seatchip.is-you { border-color: var(--p); }
 .seatchip.is-turn { background: var(--p); border-color: var(--p); color: var(--on-p); box-shadow: 0 0 0 2.5px color-mix(in srgb, var(--p) 40%, transparent); }
 .seatchip.is-turn .avatar { background: var(--on-p); color: var(--p); }
@@ -421,7 +435,7 @@ input:focus-visible, textarea:focus-visible, select:focus-visible { outline-offs
 .act-hint.is-swipe { color: var(--ink); font-weight: 700; }
 .act-hint.is-bad { color: var(--suit-red); font-weight: 650; }
 .btn-play { min-height: 54px; padding: 8px 20px; font-size: 1.1rem; font-weight: 750; margin-left: auto; position: relative; overflow: hidden; }
-.btn-play b { font-family: var(--serif); font-weight: 800; font-size: 1.3rem; letter-spacing: 0.06em; }
+.btn-play b { font-family: var(--serif); font-variant-numeric: normal; font-weight: 800; font-size: 1.3rem; letter-spacing: 0.06em; }
 .btn-play.is-swipe::after {
   content: ''; position: absolute; inset: 0; pointer-events: none;
   background: linear-gradient(110deg, transparent 35%, rgba(255, 255, 255, 0.55) 50%, transparent 65%) no-repeat;
@@ -478,7 +492,7 @@ button.seat:hover { border-color: rgba(255, 255, 255, 0.75); }
 .mini {
   display: inline-grid; place-items: center; min-width: 19px; height: 25px; padding: 0 3px; border-radius: 4px;
   background: var(--card); color: #16161a; box-shadow: 0 1.5px 0 var(--card-edge);
-  font-family: var(--serif); font-style: normal; font-weight: 800; font-size: 0.76rem; line-height: 1;
+  font-family: var(--serif); font-variant-numeric: normal; font-style: normal; font-weight: 800; font-size: 0.76rem; line-height: 1;
 }
 .mini.is-red { color: #c8102e; }
 .mini.is-ten { background: #ffe08a; }
@@ -486,7 +500,7 @@ button.seat:hover { border-color: rgba(255, 255, 255, 0.75); }
 .mini-none { font-size: 0.88rem; opacity: 0.85; font-weight: 600; }
 .score-nums { display: grid; justify-items: end; line-height: 1; }
 .score-gain { font-weight: 700; font-size: 0.9rem; opacity: 0.9; min-height: 1em; }
-.score-total { font-family: var(--serif); font-weight: 800; font-size: 1.9rem; }
+.score-total { font-family: var(--serif); font-variant-numeric: normal; font-weight: 800; font-size: 1.9rem; }
 .score-row.is-bust .score-total { text-decoration: underline wavy 2px; text-underline-offset: 5px; }
 .score-bar { grid-column: 1 / -1; height: 5px; border-radius: 3px; background: rgba(255, 255, 255, 0.16); overflow: hidden; }
 .score-bar i { display: block; height: 100%; border-radius: 3px; background: var(--p); transition: width 0.9s cubic-bezier(0.2, 0.8, 0.2, 1) 0.4s; }
@@ -510,8 +524,8 @@ button.pl:hover { background: color-mix(in srgb, var(--ink) 7%, transparent); }
 .pl-name > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pl-name small { font-weight: 400; color: var(--muted); font-size: 0.8rem; white-space: nowrap; }
 .pl-name svg { width: 14px; height: 14px; flex: none; align-self: center; }
-.pl-cards { font-family: var(--serif); font-weight: 700; font-size: 0.9rem; padding: 1px 6px; border-radius: 4px; background: var(--card); color: #16161a; box-shadow: 0 1.5px 0 var(--card-edge); }
-.pl-score { font-family: var(--serif); font-weight: 800; font-size: 1.05rem; text-align: right; }
+.pl-cards { font-family: var(--serif); font-variant-numeric: normal; font-weight: 700; font-size: 0.9rem; padding: 1px 6px; border-radius: 4px; background: var(--card); color: #16161a; box-shadow: 0 1.5px 0 var(--card-edge); }
+.pl-score { font-family: var(--serif); font-variant-numeric: normal; font-weight: 800; font-size: 1.05rem; text-align: right; }
 .pl .score-bar { height: 4px; background: color-mix(in srgb, var(--ink) 12%, transparent); }
 .watchers { display: flex; flex-wrap: wrap; gap: 5px 6px; align-items: center; }
 .watcher { padding: 2px 9px; border: 0; border-radius: 999px; background: color-mix(in srgb, var(--ink) 10%, transparent); color: var(--ink); font-weight: 600; font-size: 0.9rem; }
@@ -547,7 +561,7 @@ button.pl:hover { background: color-mix(in srgb, var(--ink) 7%, transparent); }
 .callout-band span { font-weight: 750; font-size: clamp(1rem, 4vw, 1.6rem); margin-top: 0.4em; }
 
 .float-label {
-  position: fixed; font-family: var(--serif); font-weight: 800; font-size: 2rem; line-height: 1;
+  position: fixed; font-family: var(--serif); font-variant-numeric: normal; font-weight: 800; font-size: 2rem; line-height: 1;
   padding: 4px 12px 6px; border-radius: 12px; background: var(--p); color: #fff; text-shadow: 0 1px 0 rgba(0, 0, 0, 0.5);
   box-shadow: 0 0 0 3px #fffdf8, 0 8px 18px rgba(0, 0, 0, 0.4);
 }
@@ -577,7 +591,7 @@ button.pl:hover { background: color-mix(in srgb, var(--ink) 7%, transparent); }
 .set-row label { font-weight: 600; }
 .set-row select { width: auto; min-width: 110px; }
 .limit-pick { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
-.limit-pick input[type='number'] { width: 92px; font-family: var(--serif); font-weight: 800; }
+.limit-pick input[type='number'] { width: 92px; font-family: var(--serif); font-variant-numeric: normal; font-weight: 800; }
 .seg { display: inline-flex; border: 1.5px solid var(--line); border-radius: var(--r-ui); overflow: hidden; background: var(--panel); }
 .seg label { position: relative; }
 .seg input { position: absolute; opacity: 0; inset: 0; }

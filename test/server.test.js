@@ -38,7 +38,7 @@ async function createRoom() {
 /** A tiny test client: tracks the latest state and lets tests await changes. */
 function client(room, name, token = `token-${name}-${Math.random().toString(36).slice(2)}-pad`) {
   const ws = new WebSocket(`ws://127.0.0.1:${PORT}/ws`);
-  const c = { ws, name, token, state: null, errors: [], fatal: null, waiters: [], seq: 0, replies: new Map() };
+  const c = { ws, name, token, state: null, events: [], errors: [], fatal: null, waiters: [], seq: 0, replies: new Map() };
   const check = () => {
     c.waiters = c.waiters.filter((w) => {
       if (!w.pred(c)) return true;
@@ -49,7 +49,10 @@ function client(room, name, token = `token-${name}-${Math.random().toString(36).
   ws.on('open', () => ws.send(JSON.stringify({ t: 'hello', room, token, name })));
   ws.on('message', (raw) => {
     const msg = JSON.parse(raw);
-    if (msg.t === 'state') c.state = msg.s;
+    if (msg.t === 'state') {
+      c.state = msg.s;
+      if (msg.s.round) c.events.push(msg.s.round.last); // every event this client was shown, in order
+    }
     if (msg.t === 'err') c.errors.push(msg.m);
     if (msg.t === 'err' || msg.t === 'ack') c.replies.set(msg.n, msg.t === 'err' ? msg.m : null);
     if (msg.t === 'fatal' || msg.t === 'kicked') c.fatal = msg;
@@ -247,8 +250,23 @@ test('a flipped blind card is shown to the whole table and has to be played', as
     }
     const now = m.state.round;
     if (now.turn === m.id() && !now.pending && !now.seats[m.id()].up[0] && now.seats[m.id()].blind[0]) {
+      const before = now.last.seq;
       assert.equal(await m.do('flip', { slot: 0 }), null);
-      await settle(all, (s) => s.round.pending, 'the flip');
+      await settle(all, (s) => s.round.last.seq > before, 'the flip');
+      const flip = m.events.find((e) => e.seq === before + 1);
+      assert.equal(flip.kind, 'flip');
+      if (flip.card.r === '10') {
+        // A ten plays itself: everyone is shown the flip, then the swipe.
+        await settle(all, (s) => s.round.last.seq === before + 2, 'the automatic play');
+        for (const c of all) {
+          const shown = c.events.filter((e) => e.seq > before).map((e) => e.kind);
+          assert.deepEqual([...new Set(shown)], ['flip', 'play'], 'flip first, then the play');
+          assert.equal(c.state.round.last.swipe, 'ten');
+          assert.equal(c.state.round.pending, null);
+          assert.equal(c.state.round.turn, m.id(), 'and the same player goes again');
+        }
+        return;
+      }
       for (const c of all) {
         const shown = c.state.round.seats[m.id()].blind[0];
         assert.ok(shown.id && shown.r, 'everyone sees the flipped card');

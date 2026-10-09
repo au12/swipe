@@ -56,7 +56,7 @@ const PIPS = {
 function corner(rank, suit) {
   const label =
     rank === '10'
-      ? `<text x="31" y="58" text-anchor="middle" class="ten">10</text>`
+      ? `<text transform="translate(32 60) scale(.77 1)" text-anchor="middle" class="ten">10</text>`
       : `<text x="30" y="60" text-anchor="middle">${rank}</text>`;
   const one = `<g fill="${ink(suit)}" class="idx">${label}${pip(suit, 30, 88, 30)}</g>`;
   return `${one}<g transform="rotate(180 125 175)">${one}</g>`;
@@ -160,7 +160,7 @@ export function backHTML(b, { tag = 'span', cls = '', attrs = '', style = '' } =
   return `<${tag}${type} class="card back b${b ? 1 : 0} ${cls}"${style ? ` style="${style}"` : ''} ${attrs}></${tag}>`;
 }
 
-/** A card with both sides, for flips in mid-air. Shows its back until `.is-up` is added. */
+/** A card with both sides, for flips in mid-air. It lies face down until fx.js turns it over. */
 export function flipHTML(card, { cls = '', style = '' } = {}) {
   return `<span class="card flipper ${cls}"${style ? ` style="${style}"` : ''}><span class="flip-in">${backHTML(card.b, { cls: 'flip-back' })}${faceHTML(card, { cls: 'flip-face' })}</span></span>`;
 }

@@ -50,7 +50,7 @@ The rule sheet leaves a few things open. These are the calls the game makes; eac
 
 - **No jokers.** The sheet gives them no rank and no score, so each deck is the standard 52.
 - **Face-up table cards can be played at any time**, on their own or together with matching cards from your hand. A blind card becomes playable as soon as the face-up card on top of it is gone, whether or not you still hold cards.
-- **Several tens can go down together**, though one is enough to swipe.
+- **Tens go down one at a time.** Each one swipes and earns another turn, so a second ten can follow on that turn. A blind card that turns out to be a ten is played automatically.
 - **Going out counts even if the last card is a swipe.** A last card that is too high does not go out: the pile comes home first.
 - **Ties for the first lead** are settled at random among the tied hands. Hand totals use the scoring values (tens count 20).
 - **The match ends when someone reaches the limit** (100 is enough; it does not have to be passed). Ties for the lowest score share the win.

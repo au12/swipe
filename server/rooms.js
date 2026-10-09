@@ -367,6 +367,7 @@ export class Rooms {
       log.warn(`Auto move failed in ${room.code}: ${res.error}`);
       return res.error;
     }
+    this.settleFlip(room, r);
     // A flipped blind card stays on show for a moment before it is played.
     // (Computer players pace themselves in syncTimer.)
     if (r.pending && !room.players.get(game.current(r))?.bot) {
@@ -376,6 +377,16 @@ export class Rooms {
     this.afterChange(room);
     this.broadcast(room);
     return null;
+  }
+
+  /**
+   * A flipped ten plays itself. Everyone is sent the flip first, so they see
+   * the card turn over, and then the swipe that follows straight after it.
+   */
+  settleFlip(room, r) {
+    if (!game.flippedTen(r)) return;
+    this.broadcast(room);
+    game.playFlippedTen(r);
   }
 
   /** Bookkeeping after anything that may have moved the game on. */
@@ -544,6 +555,7 @@ export class Rooms {
         if (!r) return 'The game has not started.';
         const res = game.flip(r, me.id, Number(msg.slot));
         if (!res.ok) return res.error;
+        this.settleFlip(room, r);
         break;
       }
       case 'play': {

@@ -400,6 +400,11 @@ export function renderActions(state, me, ui) {
     return (el.innerHTML = `<p class="act-hint">${watching}</p>${nudge}${join}`);
   }
 
+  // A flipped ten plays itself: there is nothing to press.
+  if (r.pending && r.seats[me.id]?.blind[r.pending.slot]?.r === TEN) {
+    return (el.innerHTML = '<p class="act-hint is-swipe">A ten! It swipes the pile, and you go again.</p>');
+  }
+
   const p = preview(state, me, ui);
   if (!p) {
     const hint = r.pending ? 'Your blind card is face up. It has to be played now.' : 'Tap the cards you want to play. Cards of the same rank go down together.';
@@ -425,7 +430,7 @@ export function renderActions(state, me, ui) {
 
   // Offer the rest of the rank in one tap when more would fit.
   const open = myOpenCards(state, me).filter((c) => c.r === rank);
-  const room = rank === TEN ? 4 : rank === p.top.rank ? 4 - p.top.run : 4;
+  const room = rank === TEN ? 1 : rank === p.top.rank ? 4 - p.top.run : 4;
   const most = Math.min(open.length, room);
   const all = most > cards.length ? `<button type="button" class="btn btn-all" data-act="pick-all" data-n="${most}">All ${most}</button>` : '';
 

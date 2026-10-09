@@ -5,7 +5,7 @@ import { $, $$, esc, formatClock, icon, onColor, reducedMotion, sleep, store, to
 import { Connection } from './net.js';
 import { buzz, play as sfx, setSound, soundOn } from './sound.js';
 import { backHTML, faceHTML, flipHTML } from './cards.js';
-import { judge } from './rules.js';
+import { TEN, judge } from './rules.js';
 import * as fx from './fx.js';
 import {
   colorOf,
@@ -701,6 +701,7 @@ function pickCard(id) {
       if (flipped) return toast(`Only another ${flipped.r} can go down with your flipped card.`, { error: true });
       ui.selected.clear();
     }
+    if (card.r === TEN && current.length && current[0].r === TEN) ui.selected.clear(); // one ten at a time: the tap moves the pick
     if (ui.selected.size >= 4) return toast('A set is four cards at most.', { error: true });
     ui.selected.add(id);
     sfx('pick');

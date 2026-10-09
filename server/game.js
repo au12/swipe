@@ -321,14 +321,12 @@ export function autoMove(r, pid) {
   const open = [...seat.hand, ...seat.up.filter(Boolean)];
   const byRank = new Map();
   for (const c of open) byRank.set(c.r, [...(byRank.get(c.r) ?? []), c]);
-  const total = cardsLeft(seat);
 
-  // As many of one rank as the pile will take. Tens go one at a time, unless
-  // they are all that is left.
+  // As many of one rank as the pile will take. Tens always go one at a time.
   const most = (rank, forced = []) => {
     const mates = (byRank.get(rank) ?? []).filter((c) => !forced.includes(c));
     const cards = [...forced, ...mates];
-    if (rank === TEN) return cards.length === total ? cards.slice(0, SET_MAX) : cards.slice(0, Math.max(1, forced.length));
+    if (rank === TEN) return cards.slice(0, 1);
     const cap = rank === top.rank ? SET_MAX - top.run : SET_MAX;
     return cards.slice(0, Math.max(forced.length, Math.min(cap, cards.length)));
   };
@@ -359,6 +357,22 @@ export function autoMove(r, pid) {
   if (slot !== -1) return { a: 'flip', slot };
   if (options.length) return move(options[0].cards);
   return null;
+}
+
+/**
+ * A blind card that turns out to be a ten leaves nothing to decide: it can
+ * only be played alone, and it always swipes. Returns the card, or null.
+ */
+export function flippedTen(r) {
+  if (!r.pending || r.phase !== 'play') return null;
+  const card = r.seats[r.pending.pid]?.blind[r.pending.slot];
+  return card && card.r === TEN ? card : null;
+}
+
+/** Plays a flipped ten on its owner's behalf. */
+export function playFlippedTen(r) {
+  const card = flippedTen(r);
+  return card ? play(r, r.pending.pid, [card.id]) : fail('No ten to play.');
 }
 
 /** Applies autoMove. Returns the result of the move, or a failure if there was nothing to do. */
