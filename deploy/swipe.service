@@ -1,0 +1,23 @@
+# systemd unit for running Swipe without Docker.
+#   sudo cp deploy/swipe.service /etc/systemd/system/
+#   sudo systemctl enable --now swipe
+
+[Unit]
+Description=Swipe card game
+After=network.target
+
+[Service]
+Type=simple
+User=swipe
+WorkingDirectory=/opt/swipe
+ExecStart=/usr/bin/node server/index.js
+Environment=NODE_ENV=production
+Environment=PORT=3000
+Environment=DATA_DIR=/var/lib/swipe
+Restart=on-failure
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/swipe
+
+[Install]
+WantedBy=multi-user.target

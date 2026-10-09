@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 250 350">
+  <defs>
+    <pattern id="lat" width="17" height="17" patternUnits="userSpaceOnUse" patternTransform="rotate(45 125 175)">
+      <path d="M0 0h17M0 0v17" stroke="#fff" stroke-width="1.5" opacity=".5"/>
+      <circle cx="8.5" cy="8.5" r="2" fill="#fff" opacity=".75"/>
+    </pattern>
+  </defs>
+  <rect width="250" height="350" rx="15" fill="#fffdf8"/>
+  <rect x="13" y="13" width="224" height="324" rx="8" fill="#1c4a96"/>
+  <rect x="13" y="13" width="224" height="324" rx="8" fill="url(#lat)"/>
+  <rect x="22" y="22" width="206" height="306" rx="4" fill="none" stroke="#fff" stroke-width="3.2"/>
+  <rect x="29" y="29" width="192" height="292" rx="2" fill="none" stroke="#fff" stroke-width="1.2"/>
+  <g transform="translate(29 29) rotate(0)"><path d="M0 0h34a34 34 0 0 1-34 34z" fill="#1c4a96" stroke="#fff" stroke-width="2.4" stroke-linejoin="round"/><path d="M0 0l30 16M0 0l16 30M0 0l24 24" stroke="#fff" stroke-width="1.4"/><circle r="5" fill="#fff"/></g><g transform="translate(221 29) rotate(90)"><path d="M0 0h34a34 34 0 0 1-34 34z" fill="#1c4a96" stroke="#fff" stroke-width="2.4" stroke-linejoin="round"/><path d="M0 0l30 16M0 0l16 30M0 0l24 24" stroke="#fff" stroke-width="1.4"/><circle r="5" fill="#fff"/></g><g transform="translate(221 321) rotate(180)"><path d="M0 0h34a34 34 0 0 1-34 34z" fill="#1c4a96" stroke="#fff" stroke-width="2.4" stroke-linejoin="round"/><path d="M0 0l30 16M0 0l16 30M0 0l24 24" stroke="#fff" stroke-width="1.4"/><circle r="5" fill="#fff"/></g><g transform="translate(29 321) rotate(270)"><path d="M0 0h34a34 34 0 0 1-34 34z" fill="#1c4a96" stroke="#fff" stroke-width="2.4" stroke-linejoin="round"/><path d="M0 0l30 16M0 0l16 30M0 0l24 24" stroke="#fff" stroke-width="1.4"/><circle r="5" fill="#fff"/></g>
+  <circle cx="125" cy="84" r="31" fill="#1c4a96" stroke="#fff" stroke-width="3"/>
+    <circle cx="125" cy="84" r="24.5" fill="none" stroke="#fff" stroke-width="1.2"/>
+    <g stroke="#fff" stroke-width="2" stroke-linecap="round"><path d="M125 57V76" transform="rotate(0 125 84)"/><path d="M125 57V76" transform="rotate(45 125 84)"/><path d="M125 57V76" transform="rotate(90 125 84)"/><path d="M125 57V76" transform="rotate(135 125 84)"/><path d="M125 57V76" transform="rotate(180 125 84)"/><path d="M125 57V76" transform="rotate(225 125 84)"/><path d="M125 57V76" transform="rotate(270 125 84)"/><path d="M125 57V76" transform="rotate(315 125 84)"/></g>
+    <circle cx="125" cy="84" r="6.5" fill="#fff"/><circle cx="125" cy="84" r="2.6" fill="#1c4a96"/><circle cx="125" cy="266" r="31" fill="#1c4a96" stroke="#fff" stroke-width="3"/>
+    <circle cx="125" cy="266" r="24.5" fill="none" stroke="#fff" stroke-width="1.2"/>
+    <g stroke="#fff" stroke-width="2" stroke-linecap="round"><path d="M125 239V258" transform="rotate(0 125 266)"/><path d="M125 239V258" transform="rotate(45 125 266)"/><path d="M125 239V258" transform="rotate(90 125 266)"/><path d="M125 239V258" transform="rotate(135 125 266)"/><path d="M125 239V258" transform="rotate(180 125 266)"/><path d="M125 239V258" transform="rotate(225 125 266)"/><path d="M125 239V258" transform="rotate(270 125 266)"/><path d="M125 239V258" transform="rotate(315 125 266)"/></g>
+    <circle cx="125" cy="266" r="6.5" fill="#fff"/><circle cx="125" cy="266" r="2.6" fill="#1c4a96"/>
+  <path d="M125 115v8M125 227v8" stroke="#fff" stroke-width="2.4" stroke-linecap="round"/>
+  <circle cx="125" cy="175" r="53" fill="#153a7a" stroke="#fff" stroke-width="3.2"/>
+  <circle cx="125" cy="175" r="45.5" fill="none" stroke="#fff" stroke-width="1.2"/>
+  <g fill="none" stroke="#fff" stroke-width="2"><ellipse cx="125" cy="149" rx="9.5" ry="25" transform="rotate(0 125 175)"/><ellipse cx="125" cy="149" rx="9.5" ry="25" transform="rotate(45 125 175)"/><ellipse cx="125" cy="149" rx="9.5" ry="25" transform="rotate(90 125 175)"/><ellipse cx="125" cy="149" rx="9.5" ry="25" transform="rotate(135 125 175)"/><ellipse cx="125" cy="149" rx="9.5" ry="25" transform="rotate(180 125 175)"/><ellipse cx="125" cy="149" rx="9.5" ry="25" transform="rotate(225 125 175)"/><ellipse cx="125" cy="149" rx="9.5" ry="25" transform="rotate(270 125 175)"/><ellipse cx="125" cy="149" rx="9.5" ry="25" transform="rotate(315 125 175)"/></g>
+  <circle cx="125" cy="175" r="9" fill="#fff"/><circle cx="125" cy="175" r="3.6" fill="#153a7a"/>
+</svg>

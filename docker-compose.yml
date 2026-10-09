@@ -1,0 +1,19 @@
+services:
+  swipe:
+    build: .
+    image: swipe:latest
+    container_name: swipe
+    restart: unless-stopped
+    ports:
+      - "3001:3000"   # host port 3001, so it can sit next to Tradecraft on 3000
+    environment:
+      SITE_NAME: Swipe
+      # CREATE_PASSWORD: "only-my-friends"   # require this to create rooms
+      # BASE_PATH: /swipe                   # if you serve it under a sub-path
+      # ROOM_TTL_HOURS: "48"
+    volumes:
+      # Saved rooms (rooms.json).
+      - ./data:/data
+    # The container runs as uid 1000. If ./data is owned by someone else
+    # (Unraid uses 99:100), set the matching ids here:
+    # user: "99:100"

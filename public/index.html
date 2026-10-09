@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <base href="{{BASE}}">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>{{SITE_NAME}}</title>
+  <meta name="description" content="The card game Swipe for 3 to 24 players. Create a room, share the link, play in the browser.">
+  <meta name="theme-color" content="#1a1714">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="preload" href="fonts/archivo-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="fonts/besley-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="css/style.css">
+  <script src="js/theme.js"></script>
+  <script id="config" type="application/json">{{CONFIG}}</script>
+  <script type="module" src="js/app.js"></script>
+</head>
+<body>
+  <noscript><p class="noscript">This game needs JavaScript turned on.</p></noscript>
+
+  <!-- ───────────── Home ───────────── -->
+  <main id="home" class="home" hidden>
+    <div class="home-copy">
+      <h1 class="wordmark">{{SITE_NAME}}</h1>
+      <p class="home-lede">Shed your cards, lower every time. Play a ten or make four of a kind and the whole pile is gone.</p>
+      <form id="create-form" class="home-form">
+        <label id="create-password-row" class="field" hidden>
+          <span>Server password</span>
+          <input id="create-password" type="password" autocomplete="off" maxlength="100">
+        </label>
+        <button class="btn btn-primary btn-large" type="submit">Create a room</button>
+      </form>
+      <form id="join-form" class="home-form home-join">
+        <label class="field">
+          <span>Have a room code?</span>
+          <input id="join-code" type="text" placeholder="lucky-riffle-42" autocomplete="off" autocapitalize="none" spellcheck="false" maxlength="40">
+        </label>
+        <button class="btn" type="submit">Join room</button>
+      </form>
+      <p class="home-note">For 3 to 24 players, no accounts. Share the room link and play from your phones. <button class="link" type="button" data-act="rules">How to play</button></p>
+    </div>
+    <div class="home-table" id="home-table" aria-hidden="true"></div>
+  </main>
+
+  <!-- ───────────── Room ───────────── -->
+  <div id="room" class="room" hidden>
+    <header class="bar">
+      <a class="bar-brand" href="." aria-label="{{SITE_NAME}} home">
+        <span class="mark" aria-hidden="true"><i></i><i></i><i></i></span>
+        <span class="bar-name">{{SITE_NAME}}</span>
+      </a>
+      <button class="chip" id="invite" type="button" title="Copy the invite link">
+        <span id="invite-code"></span>
+        <span class="invite-short">Invite</span>
+        <span class="chip-icon" data-icon="copy"></span>
+      </button>
+      <div class="bar-tools">
+        <button class="tool" type="button" data-act="rules" title="How to play"><span data-icon="help"></span><span class="sr">How to play</span></button>
+        <button class="tool" type="button" data-act="sound" id="tool-sound" title="Sound"><span data-icon="sound"></span><span class="sr">Sound</span></button>
+        <button class="tool tool-theme" type="button" data-act="theme" title="Light or dark"><span data-icon="theme"></span><span class="sr">Switch light or dark</span></button>
+        <button class="tool" type="button" data-act="settings" title="Room settings"><span data-icon="gear"></span><span class="sr">Room settings</span></button>
+        <button class="chip chip-name" type="button" data-act="rename" id="me-chip" title="Change your name"></button>
+      </div>
+    </header>
+
+    <div class="banner" id="conn-banner" hidden>Reconnecting…</div>
+
+    <div class="layout">
+      <aside class="rail" id="rail-left" aria-label="Players and scores"></aside>
+
+      <main class="stage">
+        <!-- Before the first deal -->
+        <section class="mat lobby" id="lobby" hidden></section>
+
+        <!-- A game in play -->
+        <div class="game" id="game" hidden>
+          <nav class="strip" id="strip" aria-label="Turn order"></nav>
+          <section class="mat" id="mat">
+            <div class="mat-wipe" id="mat-wipe"></div>
+            <header class="turn" id="turn" aria-live="polite"></header>
+            <div class="tablezone" id="tablezone"></div>
+            <div class="pilezone" id="pilezone">
+              <div class="pile-side pile-side-left" id="pile-left"></div>
+              <div class="pile" id="pile"></div>
+              <div class="pile-side" id="pile-right"></div>
+            </div>
+          </section>
+          <section class="handzone" id="handzone"></section>
+          <div class="actions" id="actions"></div>
+        </div>
+
+        <!-- Somebody went out -->
+        <section class="mat results" id="results" hidden></section>
+      </main>
+
+      <aside class="rail" id="rail-right" aria-label="Game log"></aside>
+    </div>
+  </div>
+
+  <!-- ───────────── Full-page message (room missing, locked, removed) ───────────── -->
+  <main id="notice" class="notice" hidden>
+    <h1 id="notice-title"></h1>
+    <p id="notice-text"></p>
+    <div class="notice-actions" id="notice-actions"></div>
+  </main>
+
+  <!-- Flying cards, the swipe callout and confetti are drawn here, above everything. -->
+  <div class="fx" id="fx" aria-hidden="true"></div>
+
+  <!-- ───────────── Dialogs ───────────── -->
+  <dialog id="dlg-name" class="dialog dialog-small">
+    <form method="dialog" id="name-form">
+      <h2>What should we call you?</h2>
+      <label class="field">
+        <span>Your name</span>
+        <input id="name-input" type="text" maxlength="20" autocomplete="nickname" required>
+      </label>
+      <div class="dialog-actions">
+        <button class="btn btn-primary" type="submit" id="name-submit">Join room</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="dlg-blind" class="dialog dialog-small">
+    <form method="dialog" id="blind-form">
+      <h2>Flip this blind card?</h2>
+      <p>Once it is turned over it has to be played this turn, whatever it is. If it is higher than the pile, you pick the pile up first.</p>
+      <div class="dialog-actions">
+        <button class="btn" type="button" data-close>Leave it</button>
+        <button class="btn btn-primary" type="submit" id="blind-confirm">Flip it</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="dlg-settings" class="dialog">
+    <div class="dialog-head">
+      <h2>Room settings</h2>
+      <button class="tool" type="button" data-close title="Close"><span data-icon="close"></span><span class="sr">Close</span></button>
+    </div>
+    <div class="dialog-body" id="settings-body"></div>
+  </dialog>
+
+  <dialog id="dlg-player" class="dialog dialog-small">
+    <div class="dialog-head">
+      <h2 id="player-title"></h2>
+      <button class="tool" type="button" data-close title="Close"><span data-icon="close"></span><span class="sr">Close</span></button>
+    </div>
+    <div class="dialog-body" id="player-body"></div>
+  </dialog>
+
+  <dialog id="dlg-rules" class="dialog">
+    <div class="dialog-head">
+      <h2>How to play</h2>
+      <button class="tool" type="button" data-close title="Close"><span data-icon="close"></span><span class="sr">Close</span></button>
+    </div>
+    <div class="dialog-body prose">
+      <h3>The aim</h3>
+      <p>Be the first to get rid of every card you have: the twelve in your hand, the four face-up in front of you, and the four face-down “blind” cards underneath them. When someone goes out, everybody else is stuck with the points still in front of them. Lowest score wins.</p>
+      <h3>Your turn</h3>
+      <p>Play <strong>one to four cards of the same rank</strong> onto the pile. They have to be <strong>equal to or lower</strong> than the card on top. From low to high the order is A, 2, 3, 4, 5, 6, 7, 8, 9, J, Q, K. Suits never matter.</p>
+      <p>You may play a higher card, but then you <strong>pick up the whole pile</strong> first and your cards start a new one.</p>
+      <p>Cards from your hand and your face-up row can go down together if they match.</p>
+      <h3>The swipe</h3>
+      <p>The pile is swiped off the table, out of the game, when:</p>
+      <ul>
+        <li>someone plays a <strong>ten</strong>. Tens have no rank and can go on anything.</li>
+        <li>the top four cards are the <strong>same rank</strong>, whether one player lays all four or the set builds up over several turns.</li>
+      </ul>
+      <p>Whoever made the swipe takes another turn and may play anything. One exception: four of a kind played on top of a <em>lower</em> card still swipes the pile, but the turn ends there.</p>
+      <p>A set never grows past four. If three eights are on top, you may add one, not two.</p>
+      <h3>Blind cards</h3>
+      <p>A blind card can be played once the face-up card on top of it is gone. You don’t get to look first: tap it, confirm, and it is flipped for everyone to see. It has to be played right away. If you hold cards that match it, they can go with it. If it is too high, the pile is yours.</p>
+      <h3>Scoring</h3>
+      <p>Aces are 1. Two to nine are face value. Jacks, queens and kings are 10. Tens are 20, so don’t get caught holding them.</p>
+      <p>Scores carry over from game to game. The match ends when someone reaches the points limit (100 unless the host changes it), and the lowest total wins. The first lead goes to the highest hand; after that, whoever went out leads the next game.</p>
+      <h3>The cards</h3>
+      <p>Two decks are shuffled together for 3 or 4 players, and one more for every two players after that. Everyone is dealt 20 cards; the rest sit the game out.</p>
+    </div>
+  </dialog>
+
+  <div class="toasts" id="toasts" role="status" aria-live="polite"></div>
+</body>
+</html>

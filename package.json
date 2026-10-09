@@ -1,0 +1,20 @@
+{
+  "name": "swipe",
+  "version": "1.0.0",
+  "description": "A self-hosted, real-time version of the card game Swipe for 3 to 24 players. Built on the same server as Tradecraft.",
+  "type": "module",
+  "main": "server/index.js",
+  "license": "GPL-3.0-or-later",
+  "private": true,
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "NODE_ENV=development node --watch server/index.js",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}

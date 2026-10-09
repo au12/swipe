@@ -1,0 +1,11 @@
+# Swipe behind Caddy. WebSockets and HTTPS work out of the box.
+
+games.example.com {
+    reverse_proxy 127.0.0.1:3000
+}
+
+# Under a sub-path (start the app with BASE_PATH=/swipe):
+#
+# example.com {
+#     reverse_proxy /swipe/* 127.0.0.1:3000
+# }
