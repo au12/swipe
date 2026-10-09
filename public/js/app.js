@@ -48,7 +48,7 @@ const ui = {
   tableView: 'turn', // whose table cards: the player on turn, or 'me'
   handView: 'turn',
   selected: new Set(),
-  pile: { count: 0, top: [] }, // the pile as drawn (it lags the server while cards are in the air)
+  pile: { count: 0, top: [], backs: [] }, // the pile as drawn (it lags the server while cards are in the air)
   mat: null,
   sending: false,
   blindSlot: null,
@@ -146,11 +146,11 @@ async function homeTable() {
   const draw = (cards, hideLast = false) => {
     const top = [];
     for (let i = cards.length - 1; i >= 0 && cards[i].r === cards.at(-1).r; i--) top.unshift(cards[i]);
-    const spec = pileSpec('home', cards.length, top);
+    const spec = pileSpec('home', cards.length, top, cards.slice(0, cards.length - top.length).map((c) => c.b));
     pileEl.innerHTML = spec
       .map((s, n) =>
-        s.kind === 'blank'
-          ? `<span class="card blank pile-card" style="${pileStyle(s)}"></span>`
+        s.kind === 'back'
+          ? backHTML(s.b, { cls: 'pile-card', style: pileStyle(s) })
           : faceHTML(s.card, { cls: 'pile-card is-top', style: `${pileStyle(s)}${hideLast && n === spec.length - 1 ? ';visibility:hidden' : ''}` }),
       )
       .join('');
@@ -380,7 +380,7 @@ function commit(next, { dealing = false } = {}) {
     for (const c of myOpenCards(next, me)) if (ui.selected.has(c.id) && c.r !== rank) ui.selected.delete(c.id);
     ui.selected.add(flipped.id);
   }
-  ui.pile = r ? { count: r.pile.count, top: r.pile.top } : { count: 0, top: [] };
+  ui.pile = r ? { count: r.pile.count, top: r.pile.top, backs: r.pile.backs ?? [] } : { count: 0, top: [], backs: [] };
 
   renderAll({ dealing, turnChanged: prev?.round?.turn !== r?.turn || prev?.round?.id !== r?.id });
 }
@@ -530,15 +530,20 @@ async function showPlay(prev, next, ev) {
     if (actor === me.id) buzz([30, 40, 30]);
     fx.floatLabel(`+${ev.pickup}`, to, color);
     await fx.gatherTo($$('#pile .pile-card'), to);
-    ui.pile = { count: 0, top: [] };
+    ui.pile = { count: 0, top: [], backs: [] };
     renderPile(prev, ui.pile);
   }
 
   // The pile as it will look once these cards have landed.
   const before = ui.pile;
   const joins = before.top.length && before.top.at(-1).r === ev.cards[0].r;
-  const after = { count: before.count + ev.cards.length, top: joins ? [...before.top, ...ev.cards] : ev.cards };
-  const spec = pileSpec(r0.id, after.count, after.top);
+  // If these cards cover a different rank, what was on top turns face down under them.
+  const after = {
+    count: before.count + ev.cards.length,
+    top: joins ? [...before.top, ...ev.cards] : ev.cards,
+    backs: joins ? before.backs : [...before.backs, ...before.top.map((c) => c.b)],
+  };
+  const spec = pileSpec(r0.id, after.count, after.top, after.backs);
   const anchor = fx.rectOf($('#pile'));
   // Cards already on top shuffle along to make room for the newcomers.
   for (const el of $$('#pile .pile-card.is-top')) {
@@ -572,7 +577,7 @@ async function showPlay(prev, next, ev) {
     await sleep(reducedMotion() ? 0 : 150);
     await fx.sweepOff($$('#pile .pile-card'), 1); // the same way the band is travelling
     $('#pile').classList.remove('is-hot');
-    ui.pile = { count: 0, top: [] };
+    ui.pile = { count: 0, top: [], backs: [] };
     renderPile(prev, ui.pile);
     await sleep(reducedMotion() ? 0 : 260);
   } else {
@@ -602,13 +607,14 @@ async function showDeal(s) {
   const left = r.readyAt - (Date.now() + clockOffset);
   const game = $('#game');
   const finish = () => game.classList.remove('is-dealing');
-  if (left < 2600 || reducedMotion()) return finish();
-  const k = Math.min(1, (left - 500) / 5600); // squeeze the sequence if we arrived late
+  if (left < 3600 || reducedMotion()) return finish();
+  const k = Math.min(1, (left - 400) / 7900); // squeeze the sequence if we arrived late
 
-  const cw = cardWidth();
-  const pileRect = fx.rectOf($('#pile'));
-  const center = { x: pileRect.x + pileRect.w / 2, y: pileRect.y + pileRect.h / 2 };
-  const { home, clear } = await fx.wash({ center, cw: cw * 1.12, duration: 2700 * k });
+  // The deck ends up where the pile lives. The shuffle itself happens in the
+  // middle of the screen, where there is room for it.
+  const home = fx.rectOf($('#pile'));
+  const mid = { x: home.x + home.w / 2, y: Math.max(home.y + home.h / 2, window.innerHeight * 0.47) };
+  const clear = await fx.wash({ mid, home, decks: r.decks, k });
   if (state?.round?.id !== r.id || $('#game').hidden) {
     finish();
     return clear();

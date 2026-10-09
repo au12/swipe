@@ -14,6 +14,7 @@ const HOST_HANDOVER_MS = 45_000; // an offline host is replaced after this
 const FLIP_PAUSE_MS = Math.min(1_600, Math.round(config.botDelayMs * 1.6)); // a beat for the table to see a flipped blind card
 const STALE_SEAT_MS = 120_000; // offline this long when a new match is dealt: you watch
 const MAX_BOTS = 23;
+const PILE_BACKS = 16; // how many buried pile cards the browser draws
 
 // One accent colour per player. The first twelve are the easiest to tell
 // apart, so small tables draw from those before the rest are used.
@@ -236,6 +237,7 @@ export class Rooms {
         };
       }
       const top = game.topOf(r.pile);
+      const under = r.pile.length - top.run;
       round = {
         id: r.id,
         no: r.no,
@@ -244,7 +246,13 @@ export class Rooms {
         turn: game.current(r),
         turnNo: r.turnNo,
         pending: r.pending,
-        pile: { count: r.pile.length, top: r.pile.slice(r.pile.length - top.run) },
+        // The run on top is face up for everyone. The cards beneath it are
+        // sent as backs only: enough of them to draw the heap.
+        pile: {
+          count: r.pile.length,
+          top: r.pile.slice(under),
+          backs: r.pile.slice(Math.max(0, under - PILE_BACKS), under).map((c) => c.b),
+        },
         burned: r.burned,
         decks: r.decks,
         seats,

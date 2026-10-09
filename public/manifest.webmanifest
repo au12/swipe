@@ -1,7 +1,7 @@
 {
   "name": "Swipe",
   "short_name": "Swipe",
-  "description": "The card game Swipe for 3 to 24 players. Get rid of your cards, swipe the pile, keep your score low.",
+  "description": "The card game Swipe for 2 to 24 players. Get rid of your cards, swipe the pile, keep your score low.",
   "start_url": ".",
   "scope": ".",
   "display": "standalone",

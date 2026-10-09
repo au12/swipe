@@ -89,14 +89,31 @@ const SOUNDS = {
       hiss(ac, { start: i * 0.085 + Math.random() * 0.03, dur: 0.12 + Math.random() * 0.08, freq: 900 + Math.random() * 1600, to: 1800 + Math.random() * 1500, q: 0.6, gain: 0.05 + Math.random() * 0.05, attack: 0.03 });
     }
   },
-  // Squaring the deck up: a fast run of little clicks.
-  riffle: (ac) => {
-    let t = 0;
-    for (let i = 0; i < 22; i++) {
-      hiss(ac, { start: t, dur: 0.018, freq: 3200 + i * 60, q: 2, gain: 0.1 });
-      t += 0.022 - i * 0.0006;
+  // The deck hitting the table and flying apart.
+  burst: (ac) => {
+    tone(ac, { freq: 120, to: 48, dur: 0.22, gain: 0.26, attack: 0.004 });
+    hiss(ac, { dur: 0.34, freq: 700, to: 5200, q: 0.8, gain: 0.26, attack: 0.02 });
+    for (let i = 0; i < 7; i++) hiss(ac, { start: 0.05 + i * 0.035, dur: 0.05, freq: 2200 + Math.random() * 2400, q: 1.5, gain: 0.09 });
+  },
+  // The heap being raked back into one stack.
+  gather: (ac) => {
+    hiss(ac, { dur: 0.4, freq: 4200, to: 700, q: 0.9, gain: 0.2, attack: 0.03 });
+    slap(ac, 0.36, 0.8);
+  },
+  // Two packets riffled together: a run of little clicks that speeds up. `ms` is how long it lasts.
+  riffle: (ac, ms = 480) => {
+    const n = Math.max(18, Math.round(ms / 15));
+    const span = ms / 1000;
+    for (let i = 0; i < n; i++) {
+      const p = i / n;
+      hiss(ac, { start: span * (1 - (1 - p) ** 1.25), dur: 0.016, freq: 2900 + p * 1700 + Math.random() * 300, q: 2.2, gain: 0.085 + Math.random() * 0.04 });
     }
-    slap(ac, t + 0.05, 0.9);
+  },
+  // The bridge: the cards cascade flat, then two taps to square the deck.
+  bridge: (ac) => {
+    hiss(ac, { dur: 0.16, freq: 5200, to: 1600, q: 1.2, gain: 0.2, attack: 0.01 });
+    slap(ac, 0.15, 1);
+    slap(ac, 0.27, 0.7);
   },
   pick: (ac) => tone(ac, { freq: 720, to: 980, dur: 0.05, type: 'triangle', gain: 0.07 }),
   unpick: (ac) => tone(ac, { freq: 760, to: 520, dur: 0.05, type: 'triangle', gain: 0.06 }),

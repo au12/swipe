@@ -1,6 +1,6 @@
 # Swipe
 
-A self-hosted, real-time version of the card game Swipe for 3 to 24 players, played in the browser. Create a room, share the link, play from your phones.
+A self-hosted, real-time version of the card game Swipe for 2 to 24 players, played in the browser. Create a room, share the link, play from your phones.
 
 Shed your cards onto the pile, equal or lower every time. Play a ten, or make four of a kind, and the whole pile is swiped off the table. First out wins the game; everyone else scores what they are left holding, and the lowest total wins the match.
 
@@ -15,7 +15,7 @@ Swipe is built on the same server as [Tradecraft](https://github.com/au12/tradec
 **The game**
 
 - The server runs the rules: sets of one to four equal cards, equal-or-lower on the pile, picking up when you play higher, tens, four of a kind (laid at once or built up across turns), blind cards, going out, scoring.
-- Two decks for 3 or 4 players and one more for every two players after that, mixed together, half red-backed and half blue.
+- Two decks for up to 4 players and one more for every two players after that, mixed together, half red-backed and half blue.
 - A match runs over as many games as it takes for someone to reach the points limit (100 unless the host changes it). The first lead goes to the highest hand; after that, whoever went out leads.
 - Tap cards to build a set from your hand and your face-up row together. The button tells you what the set will do before you commit: go on the pile, swipe it, or cost you a pickup.
 - Blind cards ask for confirmation, then flip for the whole table to see.
@@ -34,8 +34,8 @@ Swipe is built on the same server as [Tradecraft](https://github.com/au12/tradec
 
 **The table**
 
-- Laid out for a phone held upright: whose turn it is at the top, their table cards, the pile in the middle, the hand below. Buttons under each section switch between the current player's cards and your own.
-- The shuffle is a proper wash, then your own cards are dealt to you. Cards fly from where they are to where they are going, piles get scooped up, and a swipe looks like one.
+- Laid out for a phone held upright: whose turn it is at the top, then the pile, the table cards, and the hand below. Buttons under each section switch between the current player's cards and your own.
+- The shuffle is a full-screen casino wash: the deck bursts, swirls, is raked back in, cut and riffled, and then your own cards are dealt to you. Cards fly from where they are to where they are going, piles get scooped up, and a swipe looks like one.
 - Sound effects are synthesised in the browser, so there are no audio files. Light and dark themes.
 
 **Hosting**
@@ -132,7 +132,7 @@ Everything is an environment variable. All are optional.
 | `MAX_PLAYERS_PER_ROOM` | `64` | Upper limit on people in a room, watchers included. 24 can be dealt in. |
 | `ALLOWED_ORIGINS` | *(any)* | Comma-separated origins allowed to open the WebSocket, e.g. `https://games.example.com`. |
 | `BOT_DELAY_MS` | `1000` | Roughly how long a computer player takes over a move. |
-| `DEAL_MS` | `6400` | How long the shuffle-and-deal sequence gets before play opens. |
+| `DEAL_MS` | `8400` | How long the shuffle-and-deal sequence gets before play opens. Shorten it and the animation squeezes to fit; under about 3.6 seconds it is skipped. |
 | `MESSAGE_BUDGET` | `40` | Messages one connection may send every five seconds. |
 | `LOG_LEVEL` | `info` | `info`, `debug` or `silent`. |
 

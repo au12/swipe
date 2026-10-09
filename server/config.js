@@ -40,7 +40,7 @@ export const config = {
     .filter(Boolean),
   // Pacing. The deal sequence is as long as the shuffle animation in the
   // browser; computer players wait about this long before each move.
-  dealMs: int('DEAL_MS', 6400, 0, 20000),
+  dealMs: int('DEAL_MS', 8400, 0, 20000),
   botDelayMs: int('BOT_DELAY_MS', 1000, 0, 10000),
   // Messages one connection may send every five seconds before it is told to slow down.
   messageBudget: int('MESSAGE_BUDGET', 40, 5, 100000),

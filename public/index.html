@@ -5,7 +5,7 @@
   <base href="{{BASE}}">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>{{SITE_NAME}}</title>
-  <meta name="description" content="The card game Swipe for 3 to 24 players. Create a room, share the link, play in the browser.">
+  <meta name="description" content="The card game Swipe for 2 to 24 players. Create a room, share the link, play in the browser.">
   <meta name="theme-color" content="#1a1714">
   <link rel="icon" href="icon.svg" type="image/svg+xml">
   <link rel="manifest" href="manifest.webmanifest">
@@ -38,7 +38,7 @@
         </label>
         <button class="btn" type="submit">Join room</button>
       </form>
-      <p class="home-note">For 3 to 24 players, no accounts. Share the room link and play from your phones. <button class="link" type="button" data-act="rules">How to play</button></p>
+      <p class="home-note">For 2 to 24 players, no accounts. Share the room link and play from your phones. <button class="link" type="button" data-act="rules">How to play</button></p>
     </div>
     <div class="home-table" id="home-table" aria-hidden="true"></div>
   </main>
@@ -47,7 +47,7 @@
   <div id="room" class="room" hidden>
     <header class="bar">
       <a class="bar-brand" href="." aria-label="{{SITE_NAME}} home">
-        <span class="mark" aria-hidden="true"><i></i><i></i><i></i></span>
+        <span class="mark" aria-hidden="true"><i></i><i></i><i><svg viewBox="-50 -50 100 100"><path d="M0-44C12-26 42-9 42 13c0 13-10 22-21 22-8 0-14-4-18-10 1 9 5 17 12 22h-30c7-5 11-13 12-22-4 6-10 10-18 10-11 0-21-9-21-22C-42-9-12-26 0-44z"/></svg></i></span>
         <span class="bar-name">{{SITE_NAME}}</span>
       </a>
       <button class="chip" id="invite" type="button" title="Copy the invite link">
@@ -79,12 +79,12 @@
           <section class="mat" id="mat">
             <div class="mat-wipe" id="mat-wipe"></div>
             <header class="turn" id="turn" aria-live="polite"></header>
-            <div class="tablezone" id="tablezone"></div>
             <div class="pilezone" id="pilezone">
               <div class="pile-side pile-side-left" id="pile-left"></div>
               <div class="pile" id="pile"></div>
               <div class="pile-side" id="pile-right"></div>
             </div>
+            <div class="tablezone" id="tablezone"></div>
           </section>
           <section class="handzone" id="handzone"></section>
           <div class="actions" id="actions"></div>
@@ -175,7 +175,7 @@
       <p>Aces are 1. Two to nine are face value. Jacks, queens and kings are 10. Tens are 20, so don’t get caught holding them.</p>
       <p>Scores carry over from game to game. The match ends when someone reaches the points limit (100 unless the host changes it), and the lowest total wins. The first lead goes to the highest hand; after that, whoever went out leads the next game.</p>
       <h3>The cards</h3>
-      <p>Two decks are shuffled together for 3 or 4 players, and one more for every two players after that. Everyone is dealt 20 cards; the rest sit the game out.</p>
+      <p>Two decks are shuffled together for up to 4 players, and one more for every two players after that. Everyone is dealt 20 cards; the rest sit the game out.</p>
     </div>
   </dialog>
 

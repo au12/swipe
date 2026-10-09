@@ -204,74 +204,165 @@ export function countUp(elements, { duration = 900, delay = 0 } = {}) {
 }
 
 /**
- * The wash: a heap of red- and blue-backed cards pushed around the table the
- * way a dealer mixes them, then squared up into one stack. Resolves with the
- * stack's rect and a function that clears it away.
+ * The shuffle, done the way a casino dealer does it, and big enough to fill
+ * the screen:
+ *
+ *   burst    the deck drops in the middle of the screen and scatters
+ *   wash     every card swirls through a figure of eight, the way two hands
+ *            stir a heap, while a few get flicked up toward you
+ *   gather   the heap is pulled back into one stack
+ *   riffle   the stack is cut into its red and its blue cards, and the two
+ *            halves are riffled together and squared up with a bridge
+ *   carry    the shuffled deck slides to where the pile lives, ready to deal
+ *
+ * `mid` is the centre of the show, `home` the rect the deck ends up in, and
+ * `k` squeezes the whole thing in time (for someone who arrived late).
+ * Resolves, once the deck is home, with a function that clears it away.
  */
-export async function wash({ center, cw, duration = 2600, count = 30 }) {
-  const k = speed();
+export async function wash({ mid, home, decks = 2, k = 1 }) {
   const host = layer();
   const scene = document.createElement('div');
   scene.className = 'wash';
+  scene.innerHTML = '<div class="wash-dim"></div><div class="wash-ring"></div><div class="wash-cards"></div>';
   host.append(scene);
-  const spreadX = Math.min(window.innerWidth * 0.36, cw * 3.4);
-  const spreadY = Math.min(window.innerHeight * 0.17, cw * 2.1);
-  const home = { x: center.x - cw / 2, y: center.y - cw * 0.7, w: cw, h: cw * 1.4 };
-  const rnd = seeded(`wash${Date.now()}`);
-  const cards = [];
+  const [dim, ring, deck] = scene.children;
 
-  for (let i = 0; i < count; i++) {
+  const n = Math.max(44, Math.min(72, decks * 26));
+  const w = home.w;
+  const h = home.h;
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+  const portrait = vh > vw * 1.15;
+  const big = Math.min(1.3, Math.max(1, (vw * 0.2) / w)); // cards are a little larger while they are in play
+  // How far the heap reaches. On a phone the figure of eight stands upright to use the height.
+  const reachX = Math.max(w * 1.2, Math.min(vw * 0.5 - w * 0.7 * big, w * 5.2));
+  const reachY = Math.max(w * 1.4, Math.min(vh * 0.47 - h * 0.68 * big, w * (portrait ? 5.2 : 3.4)));
+  const left = mid.x - w / 2;
+  const top = mid.y - h / 2;
+  const dx = home.x - left;
+  const dy = home.y - top;
+  const rnd = seeded(`wash${Date.now()}`);
+
+  // The timeline, in milliseconds at full speed.
+  const BURST = 430;
+  const WASH_END = 3050;
+  const GATHERED = 3460;
+  const CUT = 3740;
+  const RIFFLE = 3900;
+  const RIFFLE_SPAN = 640;
+  const DROP = 170;
+  const BRIDGE = RIFFLE + RIFFLE_SPAN + DROP; // 4710
+  const CARRY = 4960;
+  const TOTAL = 5320;
+  const at = (t) => Math.min(1, Math.max(0, t / TOTAL));
+  const tf = (x, y, rot, scale) => `translate(${x.toFixed(1)}px,${y.toFixed(1)}px) rotate(${rot.toFixed(1)}deg) scale(${scale.toFixed(3)})`;
+
+  deck.style.transformOrigin = `${mid.x}px ${mid.y}px`;
+  const cards = [];
+  for (let i = 0; i < n; i++) {
     const el = document.createElement('div');
     el.className = 'ghost wash-card';
-    el.style.cssText = `left:${home.x}px;top:${home.y}px;width:${home.w}px;height:${home.h}px;--cw:${cw}px`;
+    el.style.cssText = `left:${left}px;top:${top}px;width:${w}px;height:${h}px;--cw:${w}px`;
     el.innerHTML = backHTML(i % 2);
-    scene.append(el);
+    deck.append(el);
     cards.push(el);
 
-    // Each card wanders round the heap on its own loop: an ellipse with a
-    // wobble, so the whole thing reads as two hands stirring.
+    const side = i % 2 ? 1 : -1; // red backs cut to the left, blue to the right
+    const lift = -i * 0.3; // each card a hair above the last
+    const frames = [{ transform: tf(0, lift - 40, 0, big * 1.25), offset: 0, easing: 'cubic-bezier(.15,.85,.3,1.2)' }];
+
+    // Burst: out to a ring, spinning.
+    const a0 = (Math.PI * 2 * i) / n + (rnd() - 0.5) * 0.9;
+    const r0 = 0.5 + rnd() * 0.5;
+    let rot = (rnd() - 0.5) * 540;
+    frames.push({ transform: tf(Math.cos(a0) * reachX * r0, Math.sin(a0) * reachY * r0, rot, big), offset: at(BURST * (0.82 + rnd() * 0.18)), easing: 'ease-in-out' });
+
+    // Wash: a figure of eight, each card on its own size of loop and at its own pace.
     const phase = rnd() * Math.PI * 2;
-    const turns = (rnd() < 0.5 ? -1 : 1) * (0.9 + rnd() * 0.9);
-    const reach = 0.35 + rnd() * 0.65;
-    const spin = (rnd() - 0.5) * 900;
-    const steps = 9;
-    const frames = [{ transform: 'translate(0px,0px) rotate(0deg)', offset: 0, easing: 'ease-out' }];
-    for (let s = 1; s <= steps; s++) {
-      const t = s / (steps + 1);
-      const a = phase + turns * Math.PI * 2 * t;
-      const wobble = 1 + 0.25 * Math.sin(a * 3 + i);
-      frames.push({
-        transform: `translate(${Math.cos(a) * spreadX * reach * wobble}px,${Math.sin(a) * spreadY * reach * wobble}px) rotate(${(spin * t + (rnd() - 0.5) * 50).toFixed(0)}deg)`,
-        offset: 0.08 + t * 0.78,
-        easing: 'ease-in-out',
-      });
+    const turns = (rnd() < 0.5 ? -1 : 1) * (1.15 + rnd() * 0.9);
+    const m = 0.3 + rnd() * 0.7;
+    const spin = (rnd() - 0.5) * 1300;
+    const tossed = i % 9 === 4 ? 2 + Math.floor(rnd() * 9) : -1; // a few cards get flicked up at you
+    const STEPS = 12;
+    for (let s = 1; s <= STEPS; s++) {
+      const tau = s / (STEPS + 1);
+      const u = phase + turns * Math.PI * 2 * tau;
+      const eightA = Math.cos(u) * m;
+      const eightB = Math.sin(2 * u) * m;
+      const x = (portrait ? eightB : eightA) * reachX + (rnd() - 0.5) * w * 0.3;
+      const y = (portrait ? eightA : eightB) * reachY + (rnd() - 0.5) * w * 0.3;
+      rot = spin * tau + (rnd() - 0.5) * 60;
+      const up = s === tossed;
+      frames.push({ transform: tf(x, y, up ? rot + 360 : rot, up ? big * 1.75 : big), offset: at(BURST + tau * (WASH_END - BURST)), easing: 'ease-in-out' });
     }
-    // Squared up: a neat stack, each card a hair above the last.
-    frames.push({ transform: `translate(0px,${-i * 0.35}px) rotate(${i % 2 ? 0.6 : -0.6}deg)`, offset: 1 });
-    el.animate(frames, { duration: duration * k, fill: 'both' });
+
+    // Gather into one stack.
+    frames.push({ transform: tf(0, lift, side * 3, big), offset: at(GATHERED - (1 - i / n) * 110), easing: 'cubic-bezier(.3,0,.2,1)' });
+    frames.push({ transform: tf(0, lift, side * 3, big), offset: at(GATHERED + 70), easing: 'cubic-bezier(.3,0,.2,1)' });
+    // Cut: reds to one side, blues to the other, each packet fanned a little
+    // and leaning in, far enough apart that the middle is clear.
+    const inPacket = Math.floor(i / 2);
+    const cut = tf(side * (w * 1.06 * big + inPacket * 0.85), -inPacket * 0.45, -side * 11, big);
+    frames.push({ transform: cut, offset: at(CUT), easing: 'linear' });
+    // Riffle: the packets let go one card at a time, alternating.
+    const t0 = RIFFLE + (i / n) * RIFFLE_SPAN;
+    frames.push({ transform: cut, offset: at(t0), easing: 'cubic-bezier(.4,0,.8,.6)' });
+    const square = (i % 2 ? 0.7 : -0.7);
+    frames.push({ transform: tf(0, lift, square, big), offset: at(t0 + DROP), easing: 'linear' });
+    // Carry the deck home.
+    frames.push({ transform: tf(0, lift, square, big), offset: at(CARRY), easing: 'cubic-bezier(.5,0,.2,1)' });
+    frames.push({ transform: tf(dx, dy + lift, square, 1), offset: 1 });
+    el.animate(frames, { duration: TOTAL * k, fill: 'both' });
   }
 
-  if (k === 1) {
-    sfx('wash');
-    setTimeout(() => sfx('wash'), duration * 0.3);
-    setTimeout(() => sfx('wash'), duration * 0.58);
-    setTimeout(() => sfx('riffle'), duration * 0.86);
+  // The whole heap breathes and rocks as it is pushed about, then gets squared up with a bridge.
+  deck.animate(
+    [
+      { transform: 'rotate(0deg) scale(1)', offset: 0 },
+      { transform: 'rotate(0deg) scale(1)', offset: at(BURST), easing: 'ease-in-out' },
+      { transform: 'rotate(-7deg) scale(1.07)', offset: at(1050), easing: 'ease-in-out' },
+      { transform: 'rotate(6deg) scale(0.94)', offset: at(1700), easing: 'ease-in-out' },
+      { transform: 'rotate(-5deg) scale(1.06)', offset: at(2350), easing: 'ease-in-out' },
+      { transform: 'rotate(0deg) scale(1)', offset: at(WASH_END) },
+      { transform: 'rotate(0deg) scale(1)', offset: at(BRIDGE), easing: 'ease-out' },
+      { transform: 'rotate(0deg) scale(1.12,0.84)', offset: at(BRIDGE + 85), easing: 'ease-in-out' },
+      { transform: 'rotate(0deg) scale(0.95,1.07)', offset: at(BRIDGE + 170), easing: 'ease-out' },
+      { transform: 'rotate(0deg) scale(1)', offset: at(CARRY) },
+      { transform: 'rotate(0deg) scale(1)', offset: 1 },
+    ],
+    { duration: TOTAL * k, fill: 'both' },
+  );
+  // The room dims for the show and comes back as the deck is carried home.
+  dim.animate([{ opacity: 0 }, { opacity: 1, offset: at(260) }, { opacity: 1, offset: at(CARRY - 120) }, { opacity: 0 }], { duration: TOTAL * k, fill: 'both' });
+  ring.style.cssText = `left:${mid.x}px;top:${mid.y}px;width:${w * 2}px;height:${w * 2}px`;
+  ring.animate(
+    [
+      { transform: 'translate(-50%,-50%) scale(0.2)', opacity: 0.85 },
+      { transform: `translate(-50%,-50%) scale(${(Math.max(reachX, reachY) / w) * 1.5})`, opacity: 0 },
+    ],
+    { duration: 620 * k, delay: 60 * k, easing: 'cubic-bezier(.1,.7,.2,1)', fill: 'both' },
+  );
+
+  if (k > 0.5) {
+    const cue = (t, name, arg) => setTimeout(() => sfx(name, arg), t * k);
+    cue(0, 'burst');
+    for (const t of [470, 1050, 1650, 2250]) cue(t, 'wash');
+    cue(WASH_END, 'gather');
+    cue(RIFFLE, 'riffle', RIFFLE_SPAN * k);
+    cue(BRIDGE + 60, 'bridge');
+    cue(CARRY, 'deal');
   }
-  await sleep(duration * k);
-  return {
-    home,
-    scene,
-    /** The stack is carried off the table. */
-    clear: async () => {
-      await Promise.all(
-        cards.map(
-          (el, i) =>
-            el.animate([{ opacity: 1, translate: '0px 0px' }, { opacity: 0, translate: `0px ${-cw * 0.5}px` }], { duration: 260 * k, delay: (count - i) * 4 * k, fill: 'forwards' })
-              .finished.catch(() => {}),
-        ),
-      );
-      scene.remove();
-    },
+  await sleep(TOTAL * k);
+
+  return async () => {
+    await Promise.all(
+      cards.map((el, i) =>
+        el
+          .animate([{ opacity: 1, translate: '0px 0px' }, { opacity: 0, translate: `0px ${-w * 0.5}px` }], { duration: 240 * k, delay: (n - i) * 3 * k, fill: 'forwards' })
+          .finished.catch(() => {}),
+      ),
+    );
+    scene.remove();
   };
 }
 

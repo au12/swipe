@@ -34,7 +34,7 @@ test('card values: ace 1, pips at face value, courts 10, tens 20', () => {
 });
 
 test('the deal: 20 cards each, 4 blind, 4 face-up, 12 in hand, half red and half blue', () => {
-  for (const [n, decks] of [[3, 2], [4, 2], [5, 3], [6, 3], [8, 4], [24, 12]]) {
+  for (const [n, decks] of [[2, 2], [3, 2], [4, 2], [5, 3], [6, 3], [8, 4], [24, 12]]) {
     const players = Array.from({ length: n }, (_, i) => `p${i}`);
     const r = game.createRound({ players });
     assert.equal(r.decks, decks);
@@ -275,9 +275,9 @@ test('the auto player always finds a legal move and prefers not to take the pile
   assert.equal(game.autoMove(r, 'a').ids.length, 2, 'plays every ten when that goes out');
 });
 
-test('three auto players can always finish a game', () => {
+test('auto players can always finish a game, from two at the table to six', () => {
   for (let n = 0; n < 40; n++) {
-    const players = ['a', 'b', 'c', 'd', 'e'].slice(0, 3 + (n % 3));
+    const players = ['a', 'b', 'c', 'd', 'e', 'f'].slice(0, 2 + (n % 5));
     const r = game.createRound({ players });
     r.phase = 'play';
     const total = players.length * 20;

@@ -141,13 +141,49 @@ test('lobby: everyone gets a seat and a colour of their own; only the host can d
   assert.equal(new Set(ana.state.players.map((p) => p.color)).size, 2);
   assert.match(await bo.do('start'), /Only the host/);
   assert.match(await bo.do('addBot'), /Only the host/);
-  assert.match(await host.do('start'), /at least 3 players/);
+  assert.equal(await bo.do('sit', { on: false }), null);
+  assert.match(await host.do('start'), /at least 2 players/, 'one person cannot play alone');
+  assert.equal(await bo.do('sit', { on: true }), null);
   assert.equal(await host.do('addBot'), null);
   await ana.until((x) => x.state.players.length === 3, 'the computer player');
   assert.equal(ana.state.players.filter((p) => p.bot).length, 1);
   assert.equal(await host.do('start'), null);
   await settle(all, (s) => s.round?.phase === 'play', 'the deal');
   assert.equal(ana.state.round.order.length, 3);
+});
+
+test('two people are enough for a game', async () => {
+  const { all, host } = await tableOf(['Ana', 'Bo']);
+  assert.equal(await host.do('start'), null);
+  await settle(all, (s) => s.round?.phase === 'play', 'the deal');
+  const r = host.state.round;
+  assert.equal(r.order.length, 2);
+  assert.equal(r.decks, 2);
+  for (const c of all) assert.equal(c.state.round.mine.length, 12);
+  await playOut(all);
+  const end = host.state.round;
+  assert.equal(end.reason, 'out');
+  assert.equal(end.result.points[end.winner], 0);
+});
+
+test('the pile is sent as a face-up top and face-down cards beneath it', async () => {
+  const { all, host } = await tableOf(['Ana', 'Bo', 'Cy']);
+  await host.do('start');
+  await settle(all, (s) => s.round?.phase === 'play', 'the deal');
+  let checked = 0;
+  for (let i = 0; i < 400 && all[0].state.round.phase === 'play'; i++) {
+    await takeTurn(all);
+    for (const c of all) {
+      const pile = c.state.round.pile;
+      const under = pile.count - pile.top.length;
+      assert.equal(pile.backs.length, Math.min(under, 16));
+      assert.ok(pile.backs.every((b) => b === 0 || b === 1), 'buried cards arrive as backs only');
+      assert.ok(pile.top.every((card) => card.r === pile.top[0].r), 'the top run is one rank');
+    }
+    if (all[0].state.round.pile.backs.length >= 3) checked += 1;
+    if (checked >= 5) break;
+  }
+  assert.ok(checked > 0, 'saw a pile with buried cards');
 });
 
 test('nobody is ever sent a card they could not see at a real table', async () => {

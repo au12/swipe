@@ -218,17 +218,21 @@ export function renderTable(state, me, ui) {
 
 /**
  * Where every visible card of the pile sits, in card-widths from the centre.
- * Lower cards get a repeatable scatter (the same card always lands the same
- * way); the cards that matter — the run on top — are fanned so each index
- * can be read.
+ * Buried cards are turned face down, so the heap shows red and blue backs
+ * peeking out, each with a repeatable scatter (the same card always lands the
+ * same way). The cards that matter — the run on top — are face up and fanned
+ * so each index can be read.
+ *
+ * `backs` lists the back colours of the buried cards, ending with the one
+ * directly under the top run. It may be shorter than the pile is deep.
  */
-export function pileSpec(roundId, count, top) {
+export function pileSpec(roundId, count, top, backs = []) {
   const under = Math.max(0, count - top.length);
-  const shown = Math.min(under, 16);
+  const shown = Math.min(under, backs.length, 16);
   const out = [];
   for (let i = under - shown; i < under; i++) {
     const rnd = seeded(`${roundId}:${i}`);
-    out.push({ kind: 'blank', i, x: (rnd() - 0.5) * 0.36, y: (rnd() - 0.5) * 0.2, rot: (rnd() - 0.5) * 44 });
+    out.push({ kind: 'back', i, b: backs[backs.length - (under - i)], x: (rnd() - 0.5) * 0.36, y: (rnd() - 0.5) * 0.2, rot: (rnd() - 0.5) * 44 });
   }
   const n = top.length;
   top.forEach((card, j) => {
@@ -245,14 +249,14 @@ export function renderPile(state, pile) {
   const r = state.round;
   const el = $('#pile');
   if (!r) return (el.innerHTML = '');
-  const spec = pileSpec(r.id, pile.count, pile.top);
+  const spec = pileSpec(r.id, pile.count, pile.top, pile.backs);
   el.style.setProperty('--depth', `${Math.min(9, Math.floor(pile.count / 6))}px`);
   el.innerHTML =
     (pile.count === 0 ? '<span class="pile-empty"></span>' : '') +
     spec
       .map((s, n) =>
-        s.kind === 'blank'
-          ? `<span class="card blank pile-card${n === 0 ? ' is-base' : ''}" style="${pileStyle(s)}"></span>`
+        s.kind === 'back'
+          ? backHTML(s.b, { cls: `pile-card${n === 0 ? ' is-base' : ''}`, style: pileStyle(s) })
           : faceHTML(s.card, { cls: `pile-card is-top${n === 0 ? ' is-base' : ''}`, style: pileStyle(s) }),
       )
       .join('');

@@ -14,11 +14,11 @@ export { judge, order, points, topOf };
 export const SLOTS = 4; // blind cards, each with a face-up card on top
 export const HAND = 12;
 export const PER_PLAYER = SLOTS * 2 + HAND; // 20
-export const MIN_PLAYERS = 3;
+export const MIN_PLAYERS = 2;
 export const MAX_PLAYERS = 24;
 const LOG_MAX = 80;
 
-/** Two decks for 3–4 players, three for 5–6, four for 7–8, and so on. */
+/** Two decks for up to 4 players, three for 5–6, four for 7–8, and so on. */
 export const decksFor = (players) => Math.max(2, Math.ceil(players / 2));
 
 /** Fisher–Yates using a crypto-backed integer source (injectable for tests). */

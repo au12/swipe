@@ -266,6 +266,7 @@ input:focus-visible, textarea:focus-visible, select:focus-visible { outline-offs
 .mark i { position: absolute; left: 6px; top: 2px; width: 14px; height: 20px; border-radius: 2.5px; background: var(--deck-blue); box-shadow: 0 0 0 1.5px var(--card); transform-origin: 50% 110%; rotate: -24deg; }
 .mark i:nth-child(2) { background: var(--deck-red); rotate: 0deg; }
 .mark i:nth-child(3) { background: var(--card); rotate: 24deg; }
+.mark i svg { position: absolute; left: 50%; top: 50%; width: 11px; height: 11px; translate: -50% -50%; fill: #16161a; }
 .bar-tools { margin-left: auto; display: flex; align-items: center; gap: 2px; min-width: 0; }
 .invite-short { display: none; }
 .bar-tools .chip { margin-left: 8px; }
@@ -530,7 +531,10 @@ button.pl:hover { background: color-mix(in srgb, var(--ink) 7%, transparent); }
 .ghost > .card { width: 100%; height: 100%; }
 .ghost > .card:not(.flipper), .ghost .flip-in > .card { box-shadow: 0 calc(var(--cw) * 0.03) 0 var(--card-edge), 0 14px 24px rgba(0, 0, 0, 0.38); }
 .wash { position: fixed; inset: 0; }
-.wash-card > .card { box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.2); } /* thirty soft shadows in one spot would turn into a black blob */
+.wash-dim { position: absolute; inset: 0; background: radial-gradient(ellipse at 50% 47%, rgba(8, 6, 4, 0.5), rgba(8, 6, 4, 0.74)); }
+.wash-cards { position: absolute; inset: 0; }
+.wash-ring { position: absolute; border-radius: 50%; border: 3px solid rgba(255, 253, 248, 0.9); box-shadow: 0 0 22px rgba(255, 253, 248, 0.5), inset 0 0 22px rgba(255, 253, 248, 0.35); }
+.wash .wash-card > .card.back { box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.2); } /* thirty soft shadows in one spot would turn into a black blob */
 
 .callout { position: fixed; inset: 0; }
 .callout-band {
@@ -641,6 +645,7 @@ button.pl:hover { background: color-mix(in srgb, var(--ink) 7%, transparent); }
   .seat { padding: 7px 10px; gap: 8px; min-height: 46px; }
   .seat .avatar { width: 28px; height: 28px; font-size: 0.72rem; }
   .seat-add svg { margin: 0 4px; }
+  .seats > li:has(.seat-add) { grid-column: 1 / -1; } /* room for the whole label */
   .seat-tags { display: none; }
   .btn-large { padding: 12px 18px; }
 }
