@@ -12,7 +12,7 @@ services:
       # BASE_PATH: /swipe                   # if you serve it under a sub-path
       # ROOM_TTL_HOURS: "48"
     volumes:
-      # Saved rooms (rooms.json).
+      # Saved rooms (rooms.json) and the notification key pair (vapid.json).
       - ./data:/data
     # The container runs as uid 1000. If ./data is owned by someone else
     # (Unraid uses 99:100), set the matching ids here:

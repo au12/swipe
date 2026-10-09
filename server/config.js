@@ -42,6 +42,18 @@ export const config = {
   // browser; computer players wait about this long before each move.
   dealMs: int('DEAL_MS', 8400, 0, 20000),
   botDelayMs: int('BOT_DELAY_MS', 1000, 0, 10000),
+  // Turn notifications (Web Push). The key pair lives in DATA_DIR/vapid.json.
+  push: env.PUSH !== 'false',
+  // Who a push service should contact about this server: a mailto: or https: address.
+  // Left empty, the site's own address is used.
+  pushContact: (env.PUSH_CONTACT || '').trim(),
+  // Extra push-service hosts to accept besides Apple, Google, Mozilla and Microsoft.
+  pushExtraHosts: (env.PUSH_EXTRA_HOSTS || '')
+    .split(',')
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean),
+  // Someone who looks away during their own turn is reminded after this long.
+  pushRemindMs: int('PUSH_REMIND_MS', 20000, 0, 600000),
   // Messages one connection may send every five seconds before it is told to slow down.
   messageBudget: int('MESSAGE_BUDGET', 40, 5, 100000),
   logLevel: env.LOG_LEVEL || 'info',

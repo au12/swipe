@@ -20,7 +20,8 @@ Swipe is built on the same server as [Tradecraft](https://github.com/au12/tradec
 - Tap cards to build a set from your hand and your face-up row together. The button tells you what the set will do before you commit: go on the pile, swipe it, or cost you a pickup.
 - Blind cards ask for confirmation, then flip for the whole table to see.
 - Computer players, for filling a table or trying the game on your own.
-- An optional turn clock. When it runs out the turn is played automatically. The host can pause it or add 30 seconds.
+- An optional turn clock. When it runs out that player is skipped, with a banner nobody can miss, and draws penalty cards. The host can pause it or add 30 seconds.
+- Turn notifications: a push when it is your turn and you are not looking, even with the phone locked. See [Notifications and installing](#notifications-and-installing).
 - A play-by-play log and a running scoreboard.
 
 **The room**
@@ -30,6 +31,7 @@ Swipe is built on the same server as [Tradecraft](https://github.com/au12/tradec
 - Everyone gets a colour of their own. The mat in the middle of the screen takes the colour of whoever's turn it is.
 - Players who drop reconnect into their seat with their hand. If the host disappears, hosting passes to someone else.
 - People who arrive mid-match watch, and can ask to be dealt in from the next game. They start on the table's average score.
+- A seat code moves your seat, cards and score to another browser or device.
 - Nobody is ever sent a card they could not see at a real table: your own hand, everyone's face-up row, a blind card once it is flipped, and the top of the pile. Everything else leaves the server as a card back.
 
 **The table**
@@ -40,8 +42,9 @@ Swipe is built on the same server as [Tradecraft](https://github.com/au12/tradec
 
 **Hosting**
 
-- One dependency (`ws`). Fonts and card art are bundled; no external requests.
-- Rooms are saved to a JSON file and survive a restart, including the clock.
+- One dependency (`ws`). Fonts and card art are bundled. The only outside requests are the notifications themselves, sent to the browser makers' push services.
+- Installable as an app on phones and desktops.
+- Rooms are saved to a JSON file and survive a restart, including the clock. No database.
 - Works behind a reverse proxy, on a sub-path if you want.
 
 ## How the rules were read
@@ -55,6 +58,8 @@ The rule sheet leaves a few things open. These are the calls the game makes; eac
 - **Ties for the first lead** are settled at random among the tied hands. Hand totals use the scoring values (tens count 20).
 - **The match ends when someone reaches the limit** (100 is enough; it does not have to be passed). Ties for the lowest score share the win.
 - **Leaving mid-game** takes your cards out of play. Your score is kept in case you come back.
+- **A skipped turn costs cards.** When the clock runs out, nothing is played and the pile stays put, but the player draws 3 cards from the stock (the cards nobody was dealt). If they had nothing they could have played (no card that fits, no ten, no four of a kind) they draw 3 or as many cards as the pile holds, whichever is more, so sitting out the clock is never better than picking up. An unflipped blind card does not count as something to play. If the stock runs out, the swiped cards are shuffled back into it. The number is `SKIP_PENALTY` in [`server/game.js`](server/game.js). A blind card that has already been flipped is the exception to all of this: it is committed, so it is played.
+- **Two can play.** The sheet says three to twenty-four; two works and is allowed.
 
 ## Run it
 
@@ -114,6 +119,34 @@ npm start
 
 A sample systemd unit is in [`deploy/swipe.service`](deploy/swipe.service).
 
+## Notifications and installing
+
+Swipe can be installed like an app, and can send a notification when it is your turn. Players turn it on with **Notify me on my turn** in the lobby or under **Room settings**; it then follows them from room to room on that device without asking again.
+
+**What the server needs**
+
+- **HTTPS on a real hostname.** Browsers only allow notifications (and installing) on a secure address, so this works behind a reverse proxy with a certificate and not on a plain `http://` LAN address. `localhost` is the one exception, for testing. The proxy needs no extra settings.
+- **Outbound internet access.** Notifications go from the server to Apple's, Google's, Mozilla's or Microsoft's push service, which hands them to the device. Nothing comes in.
+- **Nothing else.** On first start the server makes a key pair and saves it as `vapid.json` in the data folder, next to `rooms.json`. Keep that file: if it is lost, everyone has to turn notifications on again. Each player's subscription (an address at their browser's push service and two keys) is stored with them in `rooms.json` and goes when the room does.
+
+**iPhone and iPad**
+
+Apple only delivers notifications to web apps on the Home Screen, not to Safari tabs. So on an iPhone: open the room, tap **Share**, then **Add to Home Screen**, open Swipe from the new icon, and turn notifications on there. The installed app does not share storage with Safari, so the link it is installed with carries a one-time seat code: it opens in the same room as the same player. Later launches start at the front page, which offers **Back to** your last room.
+
+Android, and desktop Chrome, Edge and Firefox, need none of that: notifications work from an ordinary tab, and installing is optional.
+
+**When a notification is sent**
+
+- The turn passes to you and the game is not in front of you (page hidden, phone locked, tab closed). Extra turns after a swipe are not announced again.
+- You look away during your own turn without playing: one reminder, after 20 seconds.
+- Never while you are looking at the game, and never to computer players.
+
+Messages are encrypted for the one browser they are meant for (RFC 8291) and signed with the server's key (VAPID, RFC 8292). The push service that relays them cannot read them. An undelivered notification is dropped after ten minutes, and a newer one replaces an older one for the same room.
+
+**Seat codes**
+
+A seat belongs to a browser. **Room settings → Another browser** shows a code that moves it to a different browser or device: open the room there, choose **Already playing in another browser?** and enter the code. Codes work once and last 15 minutes.
+
 ## Configuration
 
 Everything is an environment variable. All are optional.
@@ -125,12 +158,17 @@ Everything is an environment variable. All are optional.
 | `SITE_NAME` | `Swipe` | The name shown on the page and in the browser tab. |
 | `BASE_PATH` | *(empty)* | Set to e.g. `/swipe` to serve under a sub-path. |
 | `CREATE_PASSWORD` | *(empty)* | If set, creating a room needs this password. Joining a room never does. |
-| `DATA_DIR` | `./data` (`/data` in Docker) | Where `rooms.json` is written. |
+| `DATA_DIR` | `./data` (`/data` in Docker) | Where `rooms.json` and `vapid.json` are written. |
 | `PERSIST` | `true` | Set to `false` to keep rooms in memory only. |
 | `ROOM_TTL_HOURS` | `48` | Idle rooms are deleted after this long. |
 | `MAX_ROOMS` | `500` | Upper limit on rooms. |
 | `MAX_PLAYERS_PER_ROOM` | `64` | Upper limit on people in a room, watchers included. 24 can be dealt in. |
 | `ALLOWED_ORIGINS` | *(any)* | Comma-separated origins allowed to open the WebSocket, e.g. `https://games.example.com`. |
+| `PUSH` | `true` | Set to `false` to switch turn notifications off. |
+| `PUSH_CONTACT` | *(the site's address)* | A `mailto:` or `https:` address push services can use to reach whoever runs this server. |
+| `PUSH_EXTRA_HOSTS` | *(empty)* | Extra push-service hosts to accept, comma-separated. Only the four big browser makers' services are accepted otherwise. |
+| `PUSH_REMIND_MS` | `20000` | How long after you look away during your own turn the reminder is sent. |
+| `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` | *(made on first start)* | Supply the notification key pair yourself instead of keeping it in `DATA_DIR/vapid.json`. |
 | `BOT_DELAY_MS` | `1000` | Roughly how long a computer player takes over a move. |
 | `DEAL_MS` | `8400` | How long the shuffle-and-deal sequence gets before play opens. Shorten it and the animation squeezes to fit; under about 3.6 seconds it is skipped. |
 | `MESSAGE_BUDGET` | `40` | Messages one connection may send every five seconds. |
@@ -148,6 +186,8 @@ The app speaks plain HTTP and one WebSocket at `/ws`. The proxy has to pass the 
 
 For a sub-path, set `BASE_PATH=/swipe` and forward `/swipe/` to the app. It works whether or not the proxy strips the prefix.
 
+Notifications and installing need the HTTPS address; see [Notifications and installing](#notifications-and-installing).
+
 If you put this on the public internet, consider setting `CREATE_PASSWORD` so strangers can't open rooms on your server, and `ALLOWED_ORIGINS` to your own address.
 
 ## How it is put together
@@ -159,6 +199,8 @@ server/
               clock, the running score, saving to disk, and the per-player view
               (who is allowed to see what)
   game.js     one deal of the cards, as pure functions over a plain object
+  push.js     turn notifications: message encryption and signing, written out
+              with node:crypto, and the key pair
   names.js    room codes
   config.js   environment variables
 public/       the client: plain HTML, CSS and ES modules, served as-is
@@ -168,7 +210,9 @@ public/       the client: plain HTML, CSS and ES modules, served as-is
   js/view.js    everything on screen, as functions from a snapshot to HTML
   js/fx.js      motion: flights, the wash, the swipe, confetti
   js/sound.js   sound effects, synthesised with Web Audio
+  js/push.js    notifications from the browser's side: permission, subscribing
   js/app.js     the connection, taps, dialogs, and the order things animate in
+  sw.js         the service worker: shows notifications, makes the app installable
 test/         rules tests and end-to-end tests over real WebSockets
 ```
 
@@ -181,6 +225,7 @@ The server is the only source of truth. Each change produces a fresh snapshot pe
 | `POST /api/rooms` | Create a room. Body `{ "password": "…" }` if `CREATE_PASSWORD` is set. Returns `{ "code": "…" }`. |
 | `GET /api/rooms/:code` | `{ exists, players, locked }`, or 404. |
 | `GET /healthz` | `{ ok, rooms, online, uptime }`. |
+| `GET /manifest.webmanifest` | The app manifest. With `?room=…&seat=…` its start address is that room, carrying the seat code. |
 
 ## Development
 

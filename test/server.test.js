@@ -6,17 +6,37 @@ import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import WebSocket from 'ws';
+import http from 'node:http';
 import { judge, order } from '../public/js/rules.js';
+import { browserKeys, checkVapid, decrypt } from './support/browser-side.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PORT = 39000 + Math.floor(Math.random() * 900);
 const HTTP = `http://127.0.0.1:${PORT}`;
 let server;
 
+// A stand-in push service: records every message the game server sends it.
+const PUSH_PORT = PORT + 1000;
+const PUSH = `http://127.0.0.1:${PUSH_PORT}`;
+const pushes = [];
+const pushService = http.createServer((req, res) => {
+  const chunks = [];
+  req.on('data', (c) => chunks.push(c));
+  req.on('end', () => {
+    pushes.push({ path: req.url, headers: req.headers, body: Buffer.concat(chunks) });
+    res.writeHead(req.url.includes('/gone/') ? 410 : 201).end();
+  });
+});
+const pushFor = async (path, n = 1) => {
+  for (let i = 0; i < 80 && pushes.filter((p) => p.path === path).length < n; i++) await new Promise((r) => setTimeout(r, 25));
+  return pushes.filter((p) => p.path === path);
+};
+
 before(async () => {
+  await new Promise((resolve) => pushService.listen(PUSH_PORT, '127.0.0.1', resolve));
   server = spawn(process.execPath, ['server/index.js'], {
     cwd: root,
-    env: { ...process.env, PORT: String(PORT), HOST: '127.0.0.1', PERSIST: 'false', LOG_LEVEL: 'silent', DEAL_MS: '0', BOT_DELAY_MS: '2', MESSAGE_BUDGET: '100000' },
+    env: { ...process.env, PORT: String(PORT), HOST: '127.0.0.1', PERSIST: 'false', LOG_LEVEL: 'silent', DEAL_MS: '0', BOT_DELAY_MS: '2', MESSAGE_BUDGET: '100000', PUSH_EXTRA_HOSTS: `127.0.0.1:${PUSH_PORT}`, PUSH_REMIND_MS: '60' },
     stdio: 'inherit',
   });
   for (let i = 0; i < 50; i++) {
@@ -27,7 +47,10 @@ before(async () => {
   }
   throw new Error('server did not start');
 });
-after(() => server?.kill());
+after(() => {
+  server?.kill();
+  pushService.close();
+});
 
 async function createRoom() {
   const res = await fetch(`${HTTP}/api/rooms`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
@@ -36,8 +59,8 @@ async function createRoom() {
 }
 
 /** A tiny test client: tracks the latest state and lets tests await changes. */
-function client(room, name, token = `token-${name}-${Math.random().toString(36).slice(2)}-pad`) {
-  const ws = new WebSocket(`ws://127.0.0.1:${PORT}/ws`);
+function client(room, name, token = `token-${name}-${Math.random().toString(36).slice(2)}-pad`, { claim } = {}) {
+  const ws = new WebSocket(`ws://127.0.0.1:${PORT}/ws`, { headers: { Origin: 'https://swipe.example.org' } });
   const c = { ws, name, token, state: null, events: [], errors: [], fatal: null, waiters: [], seq: 0, replies: new Map() };
   const check = () => {
     c.waiters = c.waiters.filter((w) => {
@@ -46,7 +69,7 @@ function client(room, name, token = `token-${name}-${Math.random().toString(36).
       return false;
     });
   };
-  ws.on('open', () => ws.send(JSON.stringify({ t: 'hello', room, token, name })));
+  ws.on('open', () => ws.send(JSON.stringify({ t: 'hello', room, token, name, claim })));
   ws.on('message', (raw) => {
     const msg = JSON.parse(raw);
     if (msg.t === 'state') {
@@ -55,7 +78,9 @@ function client(room, name, token = `token-${name}-${Math.random().toString(36).
     }
     if (msg.t === 'err') c.errors.push(msg.m);
     if (msg.t === 'err' || msg.t === 'ack') c.replies.set(msg.n, msg.t === 'err' ? msg.m : null);
-    if (msg.t === 'fatal' || msg.t === 'kicked') c.fatal = msg;
+    if (msg.t === 'fatal' || msg.t === 'kicked' || msg.t === 'moved') c.fatal = msg;
+    if (msg.t === 'seat') c.seat = msg;
+    if (msg.t === 'claim') c.claim = msg;
     check();
   });
   c.until = (pred, what = 'condition') =>
@@ -66,6 +91,7 @@ function client(room, name, token = `token-${name}-${Math.random().toString(36).
     });
   c.ready = () => c.until((x) => x.state !== null, 'first state');
   c.me = () => c.state.players.find((p) => p.id === c.state.you);
+  c.raw = (obj) => ws.send(JSON.stringify(obj));
   c.id = () => c.state.you;
   /** Sends an action and waits for the server's answer: null on success, else the error text. */
   c.do = async (a, data = {}) => {
@@ -442,4 +468,138 @@ test('bad input never takes the server down', async () => {
   mover.ws.send('not json');
   mover.ws.send('{"t":"a"}');
   assert.equal((await (await fetch(`${HTTP}/healthz`)).json()).ok, true);
+});
+
+// ───────────────────────── notifications and seats, end to end ─────────────────────────
+
+test('the page carries the push key, and the app pieces are served', async () => {
+  const html = await (await fetch(`${HTTP}/`)).text();
+  const cfg = JSON.parse(/<script id="config" type="application\/json">(.*?)<\/script>/s.exec(html)[1]);
+  assert.equal(Buffer.from(cfg.pushKey, 'base64url').length, 65);
+  const sw = await fetch(`${HTTP}/sw.js`);
+  assert.equal(sw.status, 200);
+  assert.match(sw.headers.get('content-type'), /javascript/);
+  assert.equal(sw.headers.get('cache-control'), 'no-cache', 'a new service worker is picked up at once');
+  const manifest = await (await fetch(`${HTTP}/manifest.webmanifest`)).json();
+  assert.equal(manifest.display, 'standalone');
+  assert.equal(manifest.start_url, '.');
+  for (const icon of manifest.icons) {
+    const res = await fetch(`${HTTP}/${icon.src}`);
+    assert.equal(res.status, 200, icon.src);
+    assert.equal(res.headers.get('content-type'), icon.type);
+  }
+  assert.ok(manifest.icons.some((i) => i.sizes === '192x192' && i.type === 'image/png'));
+  assert.ok(manifest.icons.some((i) => i.sizes === '512x512' && i.type === 'image/png'));
+  assert.equal((await fetch(`${HTTP}/icons/apple-touch-icon.png`)).status, 200);
+});
+
+test('added to a Home Screen from inside a room, the app opens in that room with the seat', async () => {
+  const get = async (q) => (await (await fetch(`${HTTP}/manifest.webmanifest${q}`)).json()).start_url;
+  assert.equal(await get('?room=lucky-riffle-42&seat=K7QM2P9X'), './r/lucky-riffle-42?seat=K7QM2P9X');
+  assert.equal(await get('?room=lucky-riffle-42'), './r/lucky-riffle-42');
+  assert.equal(await get('?room=Lucky_Riffle 42&seat=k7qm-2p9x'), './r/lucky-riffle-42?seat=K7QM2P9X');
+  assert.equal(await get('?room=../../etc&seat="><script>'), './r/etc', 'nothing but a clean room code gets through');
+  assert.equal(await get('?seat=K7QM2P9X'), '.');
+});
+
+test('a real push: signed, encrypted, and only for someone who is not looking', async () => {
+  const { all, host } = await tableOf(['Ana', 'Bo', 'Cy']);
+  const html = await (await fetch(`${HTTP}/`)).text();
+  const serverKey = JSON.parse(/<script id="config" type="application\/json">(.*?)<\/script>/s.exec(html)[1]).pushKey;
+  const devices = new Map(all.map((c) => [c, browserKeys()]));
+  const path = (c) => `/push/${c.name}-${c.token.slice(-12)}`;
+  for (const c of all) assert.equal(await c.do('push', { sub: { endpoint: `${PUSH}${path(c)}`, keys: devices.get(c).keys } }), null);
+  await settle(all, (s) => s.notify === true, 'notifications on');
+  assert.match(await host.do('push', { sub: { endpoint: 'http://127.0.0.1:1/elsewhere', keys: devices.get(host).keys } }), /not one Swipe can send to/);
+
+  await host.do('start');
+  await settle(all, (s) => s.round?.phase === 'play', 'the deal');
+  const order = all[0].state.round.order.map((id) => all.find((c) => c.id() === id));
+  const first = order.find((c) => c.id() === all[0].state.round.turn);
+  const second = order[(order.indexOf(first) + 1) % 3];
+  const third = order[(order.indexOf(first) + 2) % 3];
+
+  // The second player locks their phone. The third keeps watching.
+  second.raw({ t: 'vis', v: false });
+  await second.do('rename', { name: second.name }); // round trip, so the server has seen it
+  const before = pushes.length;
+  let guard = 0;
+  while (all[0].state.round.turn === first.id() && all[0].state.round.phase === 'play' && guard++ < 50) await takeTurn(all);
+  if (all[0].state.round.phase !== 'play') return; // freak game: over before the turn passed
+  assert.equal(all[0].state.round.turn, second.id());
+
+  const [got] = await pushFor(path(second));
+  assert.ok(got, 'the push service was called');
+  assert.equal(got.headers['content-encoding'], 'aes128gcm');
+  assert.equal(got.headers.ttl, '600');
+  assert.equal(got.headers.urgency, 'high');
+  assert.match(got.headers.topic, /^[\w-]{1,32}$/);
+  const claims = checkVapid(got.headers.authorization, serverKey);
+  assert.equal(claims.aud, PUSH);
+  assert.equal(claims.sub, 'https://swipe.example.org', 'the site’s own address, taken from the connection');
+  assert.ok(claims.exp > Date.now() / 1000 && claims.exp < Date.now() / 1000 + 24 * 3600);
+  const device = devices.get(second);
+  const message = JSON.parse(decrypt(got.body, device.privateKey, device.auth));
+  assert.equal(message.title, 'Your turn');
+  assert.equal(message.kind, 'turn');
+  assert.equal(message.url, `r/${all[0].state.code}`);
+  assert.match(message.body, new RegExp(`^${first.name} (played|picked up|swiped) .*(or lower, or a ten|Play anything|Aces only, or a ten)\\.$`));
+  assert.ok(!got.body.toString('latin1').includes('Your turn'), 'nothing readable on the wire');
+  assert.throws(() => decrypt(got.body, devices.get(third).privateKey, devices.get(third).auth), 'and nobody else’s keys open it');
+
+  // Their turn is played for them (possibly in two steps); the third player is watching, so no push.
+  for (let i = 0; i < 4 && all[0].state.round.turn === second.id() && all[0].state.round.phase === 'play'; i++) await takeTurn(all);
+  await new Promise((r) => setTimeout(r, 150));
+  assert.equal(pushes.filter((p) => p.path === path(third)).length, 0);
+  assert.equal(pushes.filter((p) => p.path === path(first)).length, 0);
+  assert.ok(pushes.length - before >= 1);
+});
+
+test('a test notification arrives, and a subscription the push service has dropped is cleared', async () => {
+  const { all } = await tableOf(['Ana', 'Bo']);
+  const [ana, bo] = all;
+  const device = browserKeys();
+  assert.match(await ana.do('pushTest'), /off in this browser/);
+  assert.equal(await ana.do('push', { sub: { endpoint: `${PUSH}/push/test-${ana.token.slice(-8)}`, keys: device.keys } }), null);
+  assert.equal(await ana.do('pushTest'), null);
+  const [got] = await pushFor(`/push/test-${ana.token.slice(-8)}`);
+  assert.equal(JSON.parse(decrypt(got.body, device.privateKey, device.auth)).title, 'Notifications are on');
+
+  const gone = browserKeys();
+  assert.equal(await bo.do('push', { sub: { endpoint: `${PUSH}/gone/${bo.token.slice(-8)}`, keys: gone.keys } }), null);
+  await bo.until((x) => x.state.notify === true, 'on');
+  assert.equal(await bo.do('pushTest'), null);
+  await bo.until((x) => x.state.notify === false, 'cleared after the push service said 410');
+  assert.equal(ana.state.notify, true, 'only the dead one');
+});
+
+test('a seat code carries a seat from one browser to another', async () => {
+  const { code, all, host } = await tableOf(['Ana', 'Bo', 'Cy']);
+  await host.do('start');
+  await settle(all, (s) => s.round?.phase === 'play', 'the deal');
+  const bo = all[1];
+  const hand = bo.state.round.mine.map((c) => c.id).sort();
+  bo.raw({ t: 'seat' });
+  await bo.until((x) => x.seat, 'a seat code');
+  assert.match(bo.seat.code, /^[A-Z2-9]{8}$/);
+  assert.ok(!JSON.stringify(host.state).includes(bo.seat.code), 'nobody else is shown it');
+
+  const wrong = client(code, '', undefined, { claim: 'AAAAAAAA' });
+  await wrong.until((x) => x.fatal, 'refusal');
+  assert.deepEqual(wrong.claim, { t: 'claim', ok: false });
+  assert.equal(wrong.fatal.code, 'name', 'a bad code just leaves a stranger at the door');
+
+  const app = client(code, '', undefined, { claim: bo.seat.code });
+  await app.ready();
+  assert.deepEqual(app.claim, { t: 'claim', ok: true });
+  assert.equal(app.id(), bo.id());
+  assert.equal(app.me().name, 'Bo');
+  assert.deepEqual(app.state.round.mine.map((c) => c.id).sort(), hand);
+  await bo.until((x) => x.fatal, 'the old browser is told');
+  assert.equal(bo.fatal.t, 'moved');
+  assert.equal(host.state.players.length, 3);
+
+  const reuse = client(code, '', undefined, { claim: bo.seat.code });
+  await reuse.until((x) => x.fatal, 'refusal');
+  assert.equal(reuse.claim.ok, false, 'a code works once');
 });

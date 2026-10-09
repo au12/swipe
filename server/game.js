@@ -16,6 +16,7 @@ export const HAND = 12;
 export const PER_PLAYER = SLOTS * 2 + HAND; // 20
 export const MIN_PLAYERS = 2;
 export const MAX_PLAYERS = 24;
+export const SKIP_PENALTY = 3; // cards drawn by a player whose clock runs out
 const LOG_MAX = 80;
 
 /** Two decks for up to 4 players, three for 5–6, four for 7–8, and so on. */
@@ -81,9 +82,11 @@ export function createRound({ players, first = null, no = 1, rnd = randomInt }) 
     turnNo: 1,
     seats,
     pile: [],
-    burned: 0, // cards swiped out of the game
+    burned: 0, // how many cards have been swiped out of the game…
+    swiped: [], // …and the cards themselves, kept as a reserve for the stock
+    stock: deck, // dealt to nobody. A skipped player draws their penalty from here.
     decks,
-    aside: deck.length, // dealt to nobody
+    aside: deck.length, // how many cards were left over after the deal
     pending: null, // { pid, slot }: a flipped blind card that must be played now
     start,
     seq: 1,
@@ -230,6 +233,7 @@ export function play(r, pid, ids) {
   let swiped = 0;
   if (verdict.effect === 'swipe') {
     swiped = r.pile.length;
+    (r.swiped ??= []).push(...r.pile);
     r.burned += swiped;
     r.pile = [];
   }
@@ -270,6 +274,69 @@ export function play(r, pid, ids) {
   return ok({ effect: verdict.effect, again: verdict.again && !out, out });
 }
 
+/**
+ * True if the player could have put something on the pile without picking it
+ * up: a card that fits, a ten, or four of a kind (which swipes whatever it
+ * lands on). Blind cards do not count: flipping one is a gamble, not a play.
+ */
+export function hasPlay(r, pid) {
+  const seat = r.seats[pid];
+  const top = topOf(r.pile);
+  const counts = new Map();
+  for (const c of [...seat.hand, ...seat.up.filter(Boolean)]) counts.set(c.r, (counts.get(c.r) ?? 0) + 1);
+  const fits = (rank, n) => {
+    const verdict = judge(top, rank, n);
+    return verdict.ok && verdict.effect !== 'pickup';
+  };
+  for (const [rank, n] of counts) {
+    if (fits(rank, 1) || (n >= SET_MAX && fits(rank, SET_MAX))) return true;
+  }
+  return false;
+}
+
+/** Takes `n` cards off the stock. When it runs dry, the swiped cards are shuffled back in to refill it. */
+function draw(r, n, rnd) {
+  r.stock ??= [];
+  r.swiped ??= [];
+  const cards = [];
+  while (cards.length < n) {
+    if (r.stock.length === 0) {
+      if (r.swiped.length === 0) break; // every card in the game is in somebody's hands or on the pile
+      r.stock = shuffle(r.swiped, rnd);
+      r.burned -= r.stock.length;
+      r.swiped = [];
+    }
+    cards.push(r.stock.pop());
+  }
+  return cards;
+}
+
+/**
+ * The clock ran out before the player did anything. They are skipped: nothing
+ * is played, the pile stays where it is and play passes on. It costs them
+ * cards from the stock (the cards nobody was dealt):
+ *
+ *   had something to play   three cards
+ *   had nothing to play     three cards, or one for every card in the pile if
+ *                           that is more — what picking it up would have cost,
+ *                           so sitting out the clock is never the better deal
+ *
+ * A blind card that has already been flipped cannot be skipped: it has to be played.
+ */
+export function skip(r, pid, { rnd = randomInt } = {}) {
+  const err = guard(r, pid);
+  if (err) return fail(err);
+  if (r.pending) return fail('A flipped blind card has to be played.');
+  const forced = !hasPlay(r, pid);
+  const cards = draw(r, forced ? Math.max(SKIP_PENALTY, r.pile.length) : SKIP_PENALTY, rnd);
+  r.seats[pid].hand.push(...cards);
+  note(r, { k: 'skip', by: pid, drew: cards.length, forced });
+  // Everyone sees how many were drawn and the colour of their backs. Only the player sees what they are.
+  emit(r, { kind: 'skip', by: pid, drew: cards.length, forced, backs: cards.map((c) => c.b) });
+  advance(r);
+  return ok({ drew: cards.length, forced });
+}
+
 /** The host called the game off. Nobody scores. */
 export function abandon(r) {
   if (r.phase === 'over') return;
@@ -286,6 +353,7 @@ export function drop(r, pid, name = '') {
   const at = r.order.indexOf(pid);
   if (at === -1 || r.phase === 'over') return false;
   const wasTurn = r.turn === at;
+  (r.swiped ??= []).push(...remaining(r.seats[pid]));
   r.burned += cardsLeft(r.seats[pid]);
   delete r.seats[pid];
   r.order.splice(at, 1);

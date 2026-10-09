@@ -45,6 +45,7 @@ export const ICONS = {
   plus: stroke('<path d="M12 5v14M5 12h14"/>'),
   eye: stroke('<path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="2.6"/>'),
   offline: stroke('<path d="M3 3l18 18M8.5 16.5a5 5 0 0 1 7 0M5 13a10 10 0 0 1 4-2.6M19 13a10 10 0 0 0-5-2.9M2 9.5a15 15 0 0 1 4-2.8M22 9.5A15 15 0 0 0 10.5 5.1"/><path d="M12 20v.01"/>'),
+  bell: stroke('<path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15L6 16z"/><path d="M10 20.5a2 2 0 0 0 4 0"/>'),
   dice: stroke('<rect x="4" y="4" width="16" height="16" rx="3"/><path d="M9 9v.01M15 15v.01M15 9v.01M9 15v.01M12 12v.01"/>'),
 };
 

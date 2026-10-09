@@ -228,6 +228,119 @@ test('going out on a swipe still wins', () => {
   assert.equal(r.winner, 'a');
 });
 
+const everyCard = (r) => [...Object.values(r.seats).flatMap(game.remaining), ...r.pile, ...r.stock, ...r.swiped];
+
+test('a skipped turn plays nothing and costs three cards from the ones nobody was dealt', () => {
+  const r = table({ a: { hand: ['K', '2'] }, pile: ['3', '5'] });
+  assert.equal(r.stock.length, 2 * 52 - 3 * 20, 'the stock is what the deal left over');
+  assert.match(game.skip(r, 'b').error, /not your turn/);
+  const stock = r.stock.length;
+  const top = r.stock.slice(-3);
+  const others = JSON.stringify([r.seats.b, r.seats.c, r.seats.a.up, r.seats.a.blind, r.pile, r.burned]);
+
+  assert.deepEqual(game.skip(r, 'a'), { ok: true, drew: 3, forced: false });
+
+  assert.deepEqual(r.seats.a.hand.map((c) => c.r).slice(0, 2), ['K', '2'], 'her own cards stay where they were');
+  assert.deepEqual(r.seats.a.hand.slice(2).map((c) => c.id).sort(), top.map((c) => c.id).sort(), 'the three come off the stock');
+  assert.equal(r.stock.length, stock - 3);
+  assert.equal(JSON.stringify([r.seats.b, r.seats.c, r.seats.a.up, r.seats.a.blind, r.pile, r.burned]), others, 'nothing else moved');
+  assert.equal(game.current(r), 'b');
+  assert.deepEqual(r.log.at(-1), { k: 'skip', by: 'a', drew: 3, forced: false });
+
+  // The event says how many and shows their backs. It never says what they are.
+  assert.deepEqual(r.last, { seq: r.seq, kind: 'skip', by: 'a', drew: 3, forced: false, backs: r.seats.a.hand.slice(2).map((c) => c.b) });
+
+  // An extra turn earned by a swipe is lost the same way.
+  const r2 = table({ a: { hand: ['10', '4'] }, pile: ['3'] });
+  game.play(r2, 'a', ids(r2, 'a', '10'));
+  assert.equal(game.current(r2), 'a');
+  assert.equal(game.skip(r2, 'a').drew, 3);
+  assert.equal(game.current(r2), 'b');
+
+  // A flipped blind card is committed: it cannot be skipped away.
+  const r3 = table({ a: { hand: ['2'], up: [null, '4', '4', '4'], blind: ['K', '5', '5', '5'] }, pile: ['3'] });
+  game.flip(r3, 'a', 0);
+  assert.match(game.skip(r3, 'a').error, /has to be played/);
+  assert.equal(game.current(r3), 'a');
+  assert.equal(r3.seats.a.hand.length, 1);
+});
+
+test('hasPlay: a card that fits, a ten or four of a kind counts; blind cards do not', () => {
+  const can = (a, pile) => game.hasPlay(table({ a, pile }), 'a');
+  assert.equal(can({ hand: ['K', 'Q'], up: ['J', '9', '9', '8'] }, ['5']), false, 'everything is too high');
+  assert.equal(can({ hand: ['K', 'Q'], up: ['J', '9', '9', '5'] }, ['5']), true, 'an equal card on the table fits');
+  assert.equal(can({ hand: ['K', '3'], up: [] }, ['5']), true, 'a lower card in hand fits');
+  assert.equal(can({ hand: ['K', '10'], up: [] }, ['A']), true, 'a ten goes on anything');
+  assert.equal(can({ hand: ['K', 'K'], up: ['K', 'K', 'Q', 'Q'] }, ['A']), true, 'four kings swipe whatever they land on');
+  assert.equal(can({ hand: ['K', 'K'], up: ['K', 'Q', 'Q', 'Q'] }, ['A']), false, 'three kings do not');
+  assert.equal(can({ hand: [], up: [], blind: ['A', 'A', 'A', 'A'] }, ['5']), false, 'a blind card is a gamble, not a play');
+  assert.equal(can({ hand: ['K'], up: [] }, []), true, 'anything goes on an empty pile');
+  assert.equal(can({ hand: ['8'], up: [] }, ['8', '8', '8']), true, 'the fourth eight');
+});
+
+test('skipped with nothing to play: one card for every card in the pile, and never fewer than three', () => {
+  const stuck = { hand: ['K', 'Q'], up: ['J', '9', '9', '8'] };
+
+  const r = table({ a: stuck, pile: ['6', '6', '5', '5', '4', '3', '3', 'A'] });
+  const stock = r.stock.length;
+  assert.deepEqual(game.skip(r, 'a'), { ok: true, drew: 8, forced: true });
+  assert.equal(r.seats.a.hand.length, 2 + 8);
+  assert.equal(r.stock.length, stock - 8);
+  assert.equal(r.pile.length, 8, 'the pile itself stays on the table');
+  assert.deepEqual(r.log.at(-1), { k: 'skip', by: 'a', drew: 8, forced: true });
+  assert.equal(r.last.backs.length, 8);
+  assert.equal(game.current(r), 'b');
+
+  const small = table({ a: stuck, pile: ['A'] });
+  assert.deepEqual(game.skip(small, 'a'), { ok: true, drew: 3, forced: true }, 'a one-card pile still costs three');
+
+  // With something to play, the size of the pile makes no difference.
+  const able = table({ a: { hand: ['K', '2'] }, pile: ['6', '6', '5', '5', '4', '3', '3', '3'] });
+  assert.deepEqual(game.skip(able, 'a'), { ok: true, drew: 3, forced: false });
+
+  // Down to blind cards only: none of them can be played without a flip.
+  const blind = table({ a: { hand: [], up: [], blind: ['2', '2', null, null] }, pile: ['9', '7', '7', '4', '4'] });
+  assert.deepEqual(game.skip(blind, 'a'), { ok: true, drew: 5, forced: true });
+  assert.equal(game.cardsLeft(blind.seats.a), 2 + 5);
+});
+
+test('when the stock runs out the swiped cards are shuffled back in', () => {
+  const r = table({ a: { hand: ['10', 'K'] }, b: { hand: ['K', 'Q'], up: ['J', '9', '9', '8'] }, pile: ['6', '5', '4', '3', '2'] });
+  r.stock = r.stock.slice(0, 2);
+  const total = everyCard(r).length;
+  game.play(r, 'a', ids(r, 'a', '10')); // six cards swiped
+  assert.equal(r.burned, 6);
+  assert.equal(r.swiped.length, 6);
+  game.play(r, 'a', ids(r, 'a', 'K'));
+  r.pile.push(...cards('7', '6', '5', '4', '3')); // b now faces six cards with nothing that fits
+  assert.equal(game.current(r), 'b');
+
+  assert.deepEqual(game.skip(r, 'b'), { ok: true, drew: 6, forced: true });
+  assert.equal(r.stock.length, 2, 'two from the stock, then the six swiped cards went in and four came out');
+  assert.equal(r.swiped.length, 0);
+  assert.equal(r.burned, 0, 'cards back in the stock are no longer counted as swiped away');
+  assert.equal(new Set(everyCard(r).map((c) => c.id)).size, total + 5, 'every card is in exactly one place');
+
+  // Nothing left anywhere: the player draws what there is.
+  const dry = table({ a: { hand: ['K', '2'] }, pile: ['3'] });
+  dry.stock = dry.stock.slice(0, 1);
+  assert.deepEqual(game.skip(dry, 'a'), { ok: true, drew: 1, forced: false });
+  dry.turn = 0;
+  assert.deepEqual(game.skip(dry, 'a'), { ok: true, drew: 0, forced: false });
+  assert.equal(game.current(dry), 'b', 'the turn still passes');
+});
+
+test('a game saved before the penalty existed can still skip without falling over', () => {
+  const r = table({ a: { hand: ['K', '2'] }, pile: ['3'] });
+  delete r.stock;
+  delete r.swiped;
+  r.burned = 7;
+  assert.deepEqual(game.skip(r, 'a'), { ok: true, drew: 0, forced: false });
+  assert.equal(r.burned, 7);
+  r.turn = 0;
+  assert.equal(game.play(r, 'a', ids(r, 'a', '2')).ok, true);
+});
+
 test('nothing can be played while the cards are being dealt', () => {
   const r = game.createRound({ players: ['a', 'b', 'c'] });
   const pid = game.current(r);
@@ -315,13 +428,16 @@ test('auto players can always finish a game, from two at the table to six', () =
     const players = ['a', 'b', 'c', 'd', 'e', 'f'].slice(0, 2 + (n % 5));
     const r = game.createRound({ players });
     r.phase = 'play';
-    const total = players.length * 20;
+    const total = r.decks * 52;
+    const skipEvery = 3 + (n % 4); // every so often somebody lets the clock run out
     let moves = 0;
     while (r.phase === 'play') {
-      const res = game.autoPlay(r, game.current(r));
+      const res = n % 2 && !r.pending && moves % skipEvery === 0 ? game.skip(r, game.current(r)) : game.autoPlay(r, game.current(r));
       assert.equal(res.ok, true, res.error);
       const held = players.reduce((sum, pid) => sum + game.cardsLeft(r.seats[pid]), 0);
-      assert.equal(held + r.pile.length + r.burned, total, 'every card is somewhere');
+      assert.equal(held + r.pile.length + r.burned + r.stock.length, total, 'every card is somewhere');
+      assert.equal(r.swiped.length, r.burned, 'the swiped cards are all kept');
+      assert.equal(new Set(everyCard(r).map((c) => c.id)).size, total, 'and no card is in two places');
       assert.ok(game.topOf(r.pile).run < 4, 'four of a kind never sits on the pile');
       assert.ok(!r.pile.some((c) => c.r === '10'), 'a ten never sits on the pile');
       if (++moves > 20000) assert.fail('game did not finish');

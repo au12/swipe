@@ -87,6 +87,12 @@ export function describe(state, me, e) {
       return `${e.by === me.id ? 'You' : (playerOf(state, e.by)?.name ?? e.name ?? 'Someone')} left the game. Those cards are out.`;
     case 'timeout':
       return `${name} ran out of time.`;
+    case 'skip': {
+      const was = e.by === me.id ? 'were' : 'was';
+      if (!e.drew) return `${name} ran out of time and ${was} skipped.`;
+      const why = e.forced && e.drew > 3 ? ' With nothing to play, that’s one for every card in the pile.' : '';
+      return `${name} ran out of time, ${was} skipped and drew ${plural(e.drew, 'card')}.${why}`;
+    }
     case 'end':
       return 'The game was called off.';
     default:
@@ -480,7 +486,7 @@ function rulesLine(state) {
 const seatsShown = new Set(); // so only a newcomer's seat pops in
 let resultsShown = null; // the round whose results have already made their entrance
 
-export function renderLobby(state, me) {
+export function renderLobby(state, me, ui = {}) {
   const el = $('#lobby');
   const isHost = me.id === state.hostId;
   const seatedPlayers = state.players.filter((p) => p.playing);
@@ -512,6 +518,7 @@ export function renderLobby(state, me) {
       <span class="lobby-you-label">${avatar(me)}This is your colour.</span>
       <button type="button" class="btn btn-small btn-mat" data-act="recolor">${icon('dice')}Pick another</button>
       <button type="button" class="btn btn-small btn-mat" data-act="${me.playing ? 'stand' : 'sit'}">${me.playing ? 'Watch instead' : 'Take a seat'}</button>
+      ${(ui.push === 'ok' && !state.notify) || ui.push === 'install' ? `<button type="button" class="btn btn-small btn-mat" data-act="push-on">${icon('bell')}Notify me on my turn</button>` : ''}
     </div>
     <p class="lobby-rules">${rulesLine(state)} ${isHost ? '<button type="button" class="link" data-act="settings">Change</button>' : ''}</p>
     <div class="lobby-go" style="${tint(me.color)}">
@@ -682,7 +689,7 @@ function hostPanel(state) {
 
 function logPanel(state, me) {
   const entries = state.round?.log ?? [];
-  const cls = (e) => (e.k === 'play' && e.effect === 'swipe' ? ' class="log-swipe"' : e.k === 'play' && e.effect === 'pickup' ? ' class="log-pickup"' : e.k === 'out' || e.k === 'end' ? ' class="log-end"' : '');
+  const cls = (e) => (e.k === 'play' && e.effect === 'swipe' ? ' class="log-swipe"' : e.k === 'play' && e.effect === 'pickup' ? ' class="log-pickup"' : e.k === 'skip' ? ' class="log-skip"' : e.k === 'out' || e.k === 'end' ? ' class="log-end"' : '');
   return `<section class="side">
       <div class="side-row"><h2>Play by play</h2>${state.round ? `<span class="side-meta">Game ${state.round.no}</span>` : ''}</div>
       <ol class="log" id="log">${

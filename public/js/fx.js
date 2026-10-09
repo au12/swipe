@@ -173,6 +173,69 @@ export function callout(text, { color, on = '#fff', sub = '', hold = 620 } = {})
   return done;
 }
 
+/**
+ * The other banner. A black band slams across the screen and shudders there,
+ * red closing in from the edges, then cuts out. `shake` is an element (the
+ * mat) that rattles along with it.
+ */
+export function skipped({ sub = '', penalty = '', shake = null } = {}) {
+  const el = document.createElement('div');
+  el.className = 'skipped';
+  el.innerHTML = `<div class="skipped-flash"></div><div class="skipped-band"><b data-text="Skipped">Skipped</b>${sub ? `<span>${sub}</span>` : ''}${penalty ? `<i>${penalty}</i>` : ''}</div>`;
+  layer().append(el);
+  const [flash, band] = el.children;
+  const word = band.firstElementChild;
+
+  if (reducedMotion()) {
+    return el.animate([{ opacity: 0 }, { opacity: 1, offset: 0.1 }, { opacity: 1, offset: 0.85 }, { opacity: 0 }], { duration: 1300, fill: 'both' }).finished.catch(() => {}).then(() => el.remove());
+  }
+
+  const SLAM = 110;
+  const RATTLE = 900;
+  const CUT = 130;
+  const total = SLAM + RATTLE + CUT;
+  const rnd = seeded(`skip${Date.now()}`);
+  // A rattle: abrupt jumps (no easing between them), dying down a little but never settling.
+  const rattle = (steps, dx, dy, rot) =>
+    Array.from({ length: steps }, (_, i) => {
+      const fade = 1 - (i / steps) * 0.55;
+      return `translate(${((rnd() - 0.5) * 2 * dx * fade).toFixed(1)}px,${((rnd() - 0.5) * 2 * dy * fade).toFixed(1)}px) rotate(${((rnd() - 0.5) * 2 * rot * fade).toFixed(2)}deg)`;
+    });
+
+  const frames = [
+    { transform: 'scale(2.2)', opacity: 0, offset: 0, easing: 'cubic-bezier(.7,0,1,.6)' },
+    { transform: 'scale(1)', opacity: 1, offset: SLAM / total, easing: 'steps(1, end)' },
+  ];
+  const jolts = rattle(26, 11, 7, 1.3);
+  jolts.forEach((t, i) => frames.push({ transform: `${t} scale(1)`, opacity: 1, offset: (SLAM + ((i + 1) / (jolts.length + 1)) * RATTLE) / total, easing: 'steps(1, end)' }));
+  frames.push({ transform: 'scale(1)', opacity: 1, offset: (SLAM + RATTLE) / total, easing: 'cubic-bezier(.6,0,1,.4)' });
+  frames.push({ transform: 'scale(1.04, 0.02)', opacity: 0, offset: 1 }); // cuts out like a switched-off screen
+  const done = band.animate(frames, { duration: total, fill: 'both' }).finished.catch(() => {});
+
+  // The word shudders on its own, faster and out of step with the band.
+  word.animate(
+    rattle(34, 5, 3, 0).map((t) => ({ transform: t, easing: 'steps(1, end)' })),
+    { duration: RATTLE, delay: SLAM, fill: 'both' },
+  );
+  flash.animate(
+    [
+      { opacity: 0, offset: 0 },
+      { opacity: 1, offset: SLAM / total },
+      { opacity: 0.45, offset: 0.3 },
+      { opacity: 0.95, offset: 0.42 },
+      { opacity: 0.5, offset: 0.6 },
+      { opacity: 0.85, offset: 0.72 },
+      { opacity: 0, offset: 1 },
+    ],
+    { duration: total, fill: 'both' },
+  );
+  shake?.animate(
+    rattle(16, 7, 4, 0.5).map((t) => ({ transform: t, easing: 'steps(1, end)' })).concat([{ transform: 'none' }]),
+    { duration: SLAM + RATTLE * 0.75, delay: SLAM * 0.6 },
+  );
+  return done.then(() => el.remove());
+}
+
 const SUIT_GLYPHS = ['♠', '♥', '♦', '♣'];
 /** Suits raining down in the given colours. */
 export function confetti(colors, { count = 70 } = {}) {

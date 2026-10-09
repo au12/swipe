@@ -5,16 +5,21 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { randomBytes, randomInt } from 'node:crypto';
+import { createHash, randomBytes, randomInt } from 'node:crypto';
 import * as game from './game.js';
 import { config, log } from './config.js';
 import { roomCode } from './names.js';
+import * as push from './push.js';
+import { rankName } from '../public/js/rules.js';
 
 const HOST_HANDOVER_MS = 45_000; // an offline host is replaced after this
 const FLIP_PAUSE_MS = Math.min(1_600, Math.round(config.botDelayMs * 1.6)); // a beat for the table to see a flipped blind card
 const STALE_SEAT_MS = 120_000; // offline this long when a new match is dealt: you watch
 const MAX_BOTS = 23;
 const PILE_BACKS = 16; // how many buried pile cards the browser draws
+const SEAT_CODE_MS = 15 * 60_000; // how long a seat code shown on screen can be used
+const SEAT_LINK_MS = 12 * 3600_000; // and one tucked into a Home Screen link, which may not be opened for a while
+const SEAT_ALPHABET = 'ABCDEFGHJKMNPQRSTVWXYZ23456789'; // nothing that looks like something else
 
 // One accent colour per player. The first twelve are the easiest to tell
 // apart, so small tables draw from those before the rest are used.
@@ -26,6 +31,13 @@ const BOT_NAMES = `Riffle Deuce Trey Queenie Maverick Lucky Slim Duchess Bluff S
 
 const now = () => Date.now();
 const newId = () => randomBytes(6).toString('base64url');
+
+/** "k7qm-2p9x" -> "K7QM2P9X" */
+export const cleanSeatCode = (raw) =>
+  String(raw ?? '')
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, '')
+    .slice(0, 16);
 
 export function cleanName(raw) {
   return String(raw ?? '')
@@ -49,6 +61,7 @@ export class Rooms {
     this.rooms = new Map();
     this.saveTimer = null;
     this.file = path.join(config.dataDir, 'rooms.json');
+    this.sendPush = push.send; // tests swap this for a recorder
   }
 
   // ───────────────────────── lifecycle ─────────────────────────
@@ -122,14 +135,17 @@ export class Rooms {
   }
 
   /** Returns { player } or { error, code }. */
-  connect(room, { token, name }, socket) {
+  connect(room, { token, name, claim = null, origin = null }, socket) {
     if (room.banned.includes(token)) return { code: 'banned', error: 'The host removed you from this room.' };
-    let player = [...room.players.values()].find((p) => p.token === token);
+    // A seat code moves someone's seat to this browser before anything else happens.
+    const claimed = claim ? this.claimSeat(room, token, claim) : null;
+    let player = claimed ?? [...room.players.values()].find((p) => p.token === token);
     if (!player) {
       const nick = cleanName(name);
-      if (!nick) return { code: 'name', error: 'Pick a name to join.' };
-      if (room.locked) return { code: 'locked', error: 'This room is locked. Ask the host to unlock it.' };
-      if (room.players.size >= config.maxPlayers) return { code: 'full', error: 'This room is full.' };
+      const failed = claim ? { claimed: false } : {};
+      if (!nick) return { code: 'name', error: 'Pick a name to join.', ...failed };
+      if (room.locked) return { code: 'locked', error: 'This room is locked. Ask the host to unlock it.', ...failed };
+      if (room.players.size >= config.maxPlayers) return { code: 'full', error: 'This room is full.', ...failed };
       player = {
         id: newId(),
         token,
@@ -145,9 +161,11 @@ export class Rooms {
         seenAt: now(),
       };
       room.players.set(player.id, player);
-    } else if (name && cleanName(name) && cleanName(name) !== player.name) {
+    } else if (!claimed && name && cleanName(name) && cleanName(name) !== player.name) {
       player.name = this.freeName(room, cleanName(name), player.id);
     }
+    if (origin) player.origin = origin;
+    socket.visible = true;
     player.sockets.add(socket);
     player.online = true;
     player.seenAt = now();
@@ -161,11 +179,159 @@ export class Rooms {
     }
     this.syncTimer(room);
     this.touch(room);
-    return { player };
+    return { player, claimed: claim ? Boolean(claimed) : null };
+  }
+
+  // ───────────────────────── seat codes ─────────────────────────
+  // A seat belongs to a browser (a random token in its storage). A seat code
+  // hands it to another one: a second device, or the copy of Swipe on an
+  // iPhone's Home Screen, which does not share storage with Safari.
+
+  /**
+   * A fresh code for this player. One shown on screen is good for a quarter
+   * of an hour; one made for a Home Screen link (`forLink`) lasts half a day,
+   * since the app may not be opened straight away. A player can hold a few at
+   * once; using any of them spends them all.
+   */
+  seatCode(room, player, { forLink = false } = {}) {
+    let code = '';
+    for (let i = 0; i < 8; i++) code += SEAT_ALPHABET[randomInt(SEAT_ALPHABET.length)];
+    const seat = { code, until: now() + (forLink ? SEAT_LINK_MS : SEAT_CODE_MS) };
+    player.seats = [...(player.seats ?? []).filter((s) => s.until > now()), seat].slice(-4);
+    this.touch(room);
+    return seat;
+  }
+
+  /** Moves the seat that `code` belongs to onto `token`. Returns the player, or null if the code is no good. */
+  claimSeat(room, token, raw) {
+    const code = cleanSeatCode(raw);
+    if (code.length !== 8) return null;
+    const owner = [...room.players.values()].find((p) => !p.bot && (p.seats ?? []).some((s) => s.code === code && s.until > now()));
+    if (!owner) return null;
+    owner.seats = [];
+    if (owner.token === token) return owner;
+
+    // If this browser had already walked in as somebody new, that somebody goes.
+    const stray = [...room.players.values()].find((p) => p.token === token);
+    if (stray) {
+      this.unseat(room, stray);
+      room.players.delete(stray.id);
+      if (room.hostId === stray.id) room.hostId = owner.id;
+      for (const s of stray.sockets) {
+        try {
+          s.close(4002, 'seat changed'); // its tabs reconnect, and come back as the owner
+        } catch {}
+      }
+    }
+    // The browser that had the seat is told where it went.
+    for (const s of owner.sockets) {
+      try {
+        s.send(JSON.stringify({ t: 'moved' }));
+        s.close(4003, 'seat moved');
+      } catch {}
+    }
+    owner.sockets = new Set();
+    owner.token = token;
+    owner.push = null; // notifications were that browser's; this one asks for its own
+    return owner;
+  }
+
+  // ───────────────────────── turn notifications ─────────────────────────
+
+  /** True while the player has the game open and in front of them somewhere. */
+  watching(player) {
+    return [...player.sockets].some((s) => s.readyState === 1 && s.visible !== false);
+  }
+
+  /** A browser reports that its page was hidden (phone locked, app switched) or shown again. */
+  setVisible(room, player, socket, visible) {
+    socket.visible = Boolean(visible);
+    if (!socket.visible) this.lookedAway(room, player);
+  }
+
+  /** Stores (or with null, forgets) where to send this player's notifications. Returns an error or null. */
+  setPush(room, player, raw) {
+    if (!config.push) return 'Turn notifications are switched off on this server.';
+    const next = raw == null ? null : push.cleanSubscription(raw);
+    if (raw != null && !next) return 'This browser’s notification service is not one Swipe can send to.';
+    if (JSON.stringify(next) === JSON.stringify(player.push ?? null)) return null;
+    player.push = next;
+    this.touch(room);
+    this.sendTo(room, player);
+    return null;
+  }
+
+  /** The turn has passed to someone: if they are not looking, tell them. */
+  alertTurn(room) {
+    const r = room.round;
+    if (!config.push || !r || r.phase !== 'play') return;
+    const pid = game.current(r);
+    if (r.alerted === pid) return; // still the same player's go (an extra turn after a swipe)
+    r.alerted = pid;
+    r.pushedTo = null;
+    this.pushTurn(room, r, room.players.get(pid));
+  }
+
+  /** Someone stopped watching. If it is their own turn and they haven't been told, remind them shortly. */
+  lookedAway(room, player) {
+    const r = room.round;
+    if (!config.push || !r || r.phase !== 'play' || !player.push) return;
+    if (game.current(r) !== player.id || r.pushedTo === player.id) return;
+    const timer = setTimeout(() => {
+      if (room.round !== r || r.phase !== 'play' || game.current(r) !== player.id || r.pushedTo === player.id) return;
+      this.pushTurn(room, r, player, { reminder: true });
+    }, config.pushRemindMs);
+    timer.unref?.();
+  }
+
+  pushTurn(room, r, player, { reminder = false } = {}) {
+    if (!player || player.bot || !player.push || this.watching(player)) return;
+    r.pushedTo = player.id;
+    this.notify(room, player, {
+      kind: 'turn',
+      title: reminder ? 'Still your turn' : 'Your turn',
+      body: this.turnText(room, r, player),
+    });
+  }
+
+  /** What happened just before this player's turn, and what they are playing onto. */
+  turnText(room, r, player) {
+    const count = ['no', 'a', 'two', 'three', 'four'];
+    const words = (rank, n) => (n === 1 ? `${rank === 'A' || rank === '8' ? 'an' : 'a'} ${rankName(rank)}` : `${count[n]} ${rankName(rank, n)}`);
+    const e = [...r.log].reverse().find((x) => x.k === 'play' || x.k === 'start' || x.k === 'skip');
+    const who = e && e.by !== player.id ? room.players.get(e.by)?.name : null;
+    let what = '';
+    if (e?.k === 'start') what = 'The cards are dealt and you lead.';
+    else if (e?.k === 'skip') what = who ? `${who} ran out of time and drew ${e.drew === 1 ? 'a card' : `${e.drew ?? 'no'} cards`}.` : '';
+    else if (e && who) {
+      if (e.effect === 'pickup') what = `${who} picked up the pile and led with ${words(e.r, e.n)}.`;
+      else if (e.effect === 'swipe') what = `${who} swiped the pile with ${words(e.r, e.n)}.`;
+      else what = `${who} played ${words(e.r, e.n)}.`;
+    }
+    const top = game.topOf(r.pile).rank;
+    const next = !top ? 'Play anything.' : top === 'A' ? 'Aces only, or a ten.' : `${top} or lower, or a ten.`;
+    return `${what} ${next}`.trim();
+  }
+
+  /** Sends one notification and forgets the subscription if the browser has dropped it. */
+  notify(room, player, message) {
+    const target = player.push;
+    if (!config.push || !target) return;
+    const payload = { ...message, room: room.code, url: `r/${room.code}`, tag: `swipe-${room.code}` };
+    const topic = createHash('sha256').update(`${room.code}:${player.id}`).digest('base64url').slice(0, 24);
+    Promise.resolve(this.sendPush(target, payload, { ttl: 600, topic, origin: player.origin ?? null }))
+      .then((result) => {
+        if (result !== 'gone' || player.push !== target) return;
+        player.push = null;
+        this.touch(room);
+        this.sendTo(room, player);
+      })
+      .catch(() => {});
   }
 
   disconnect(room, player, socket) {
     player.sockets.delete(socket);
+    if (!this.watching(player)) this.lookedAway(room, player);
     if (player.sockets.size > 0) return;
     player.online = false;
     player.seenAt = now();
@@ -276,6 +442,7 @@ export class Rooms {
       locked: room.locked,
       settings: room.settings,
       limits: { min: game.MIN_PLAYERS, max: game.MAX_PLAYERS },
+      notify: Boolean(me.push), // turn notifications are on for this player's browser
       players: [...room.players.values()]
         .sort((a, b) => a.joinedAt - b.joinedAt)
         .map((p) => ({ id: p.id, name: p.name, color: p.color, online: p.online, bot: p.bot, playing: p.playing })),
@@ -284,6 +451,15 @@ export class Rooms {
         : null,
       round,
     };
+  }
+
+  /** One player's view, to that player only. */
+  sendTo(room, player) {
+    if (!room.players.has(player.id)) return;
+    const payload = JSON.stringify({ t: 'state', s: this.viewFor(room, player) });
+    for (const socket of player.sockets) {
+      if (socket.readyState === 1) socket.send(payload);
+    }
   }
 
   broadcast(room) {
@@ -341,7 +517,7 @@ export class Rooms {
       const pace = config.botDelayMs;
       let wait = pace + randomInt(Math.round(pace * 0.7) + 1);
       if (e.kind === 'flip') wait = Math.round(pace * 1.6);
-      else if (e.kind === 'play' && (e.effect === 'swipe' || e.pickup)) wait += Math.round(pace * 1.1);
+      else if (e.kind === 'skip' || (e.kind === 'play' && (e.effect === 'swipe' || e.pickup))) wait += Math.round(pace * 1.1);
       room.botTimer = setTimeout(() => this.autoTurn(room, r), wait);
       room.botTimer.unref?.();
       return;
@@ -352,11 +528,26 @@ export class Rooms {
     }
   }
 
+  /**
+   * The turn clock ran out. The player is skipped: nothing is played for them,
+   * they draw penalty cards (see game.skip) and play passes on. The one
+   * exception is a blind card they have already flipped, which is committed
+   * and goes down on its own.
+   */
   onTimeout(room) {
     const r = room.round;
     if (!r || r.phase !== 'play' || !r.deadline || r.deadline - now() > 250) return;
-    if (!r.pending) game.note(r, { k: 'timeout', by: game.current(r) });
-    this.autoTurn(room, r);
+    const pid = game.current(r);
+    if (r.pending) {
+      // (flipDue: the flip was made for them a moment ago, by the host; nobody ran out of time.)
+      if (!r.flipDue) game.note(r, { k: 'timeout', by: pid });
+      game.play(r, pid, [r.seats[pid].blind[r.pending.slot].id]);
+    } else {
+      game.skip(r, pid);
+    }
+    r.flipDue = false;
+    this.afterChange(room);
+    this.broadcast(room);
   }
 
   /** Makes a move for whoever's turn it is. */
@@ -373,6 +564,7 @@ export class Rooms {
     if (r.pending && !room.players.get(game.current(r))?.bot) {
       r.deadline = now() + FLIP_PAUSE_MS;
       r.pausedLeft = null;
+      r.flipDue = true;
     }
     this.afterChange(room);
     this.broadcast(room);
@@ -404,6 +596,7 @@ export class Rooms {
       }
     }
     this.syncTimer(room);
+    this.alertTurn(room);
     this.touch(room);
   }
 
@@ -541,6 +734,14 @@ export class Rooms {
         for (let i = 0; i < 8 && me.color === old; i++) me.color = this.freeColor(room, me.id);
         break;
       }
+      // Notifications are between one player and the server: nobody else hears about them.
+      case 'push':
+        return this.setPush(room, me, msg.sub);
+      case 'pushTest':
+        if (!me.push) return 'Turn notifications are off in this browser.';
+        this.notify(room, me, { kind: 'test', title: 'Notifications are on', body: 'You’ll get one of these when it’s your turn and you’re not looking.' });
+        return null;
+
       case 'sit': {
         const on = Boolean(msg.on);
         if (on === me.playing) break;

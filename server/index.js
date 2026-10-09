@@ -5,6 +5,9 @@
 //   POST /api/rooms        create a room            -> { code }
 //   GET  /api/rooms/<code> does this room exist?    -> { exists, players, locked }
 //   GET  /healthz          liveness probe
+//   GET  /sw.js            the service worker (installable app, notifications)
+//   GET  /manifest.webmanifest   the app manifest; with ?room=&seat= it opens
+//                          straight into that room and brings the seat along
 //   WS   /ws               game traffic (JSON messages)
 
 import http from 'node:http';
@@ -14,7 +17,8 @@ import { createHash, timingSafeEqual } from 'node:crypto';
 import { WebSocketServer } from 'ws';
 import { config, log } from './config.js';
 import { normalizeCode } from './names.js';
-import { Rooms } from './rooms.js';
+import { Rooms, cleanSeatCode } from './rooms.js';
+import * as push from './push.js';
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -61,6 +65,7 @@ function limiter(limit, windowMs) {
   };
 }
 const createLimit = limiter(20, 60_000);
+const claimLimit = limiter(12, 60_000); // wrong seat codes are not free to guess
 
 function sameSecret(a, b) {
   const ha = createHash('sha256').update(String(a)).digest();
@@ -107,7 +112,7 @@ let indexHtml = null;
 function renderIndex() {
   if (indexHtml && process.env.NODE_ENV !== 'development') return indexHtml;
   const raw = fs.readFileSync(path.join(config.publicDir, 'index.html'), 'utf8');
-  const cfg = { siteName: config.siteName, needsPassword: Boolean(config.createPassword) };
+  const cfg = { siteName: config.siteName, needsPassword: Boolean(config.createPassword), pushKey: push.publicKey() };
   indexHtml = raw
     .replaceAll('{{BASE}}', `${config.basePath}/`)
     .replaceAll('{{SITE_NAME}}', escapeHtml(config.siteName))
@@ -196,6 +201,13 @@ const server = http.createServer(async (req, res) => {
   if (pathname === '/manifest.webmanifest') {
     const manifest = JSON.parse(fs.readFileSync(path.join(config.publicDir, 'manifest.webmanifest'), 'utf8'));
     manifest.name = manifest.short_name = config.siteName;
+    // Added to a Home Screen from inside a room, the app opens in that room.
+    // On an iPhone the installed copy has storage of its own, so a seat code
+    // rides along to bring the player's seat with it.
+    const query = new URL(req.url, 'http://x').searchParams;
+    const roomCode = normalizeCode(query.get('room'));
+    const seat = cleanSeatCode(query.get('seat'));
+    if (roomCode) manifest.start_url = `./r/${roomCode}${seat.length === 8 ? `?seat=${seat}` : ''}`;
     return send(res, 200, Buffer.from(JSON.stringify(manifest)), { 'Content-Type': MIME['.webmanifest'], 'Cache-Control': 'no-cache' });
   }
 
@@ -225,7 +237,9 @@ server.on('upgrade', (req, socket, head) => {
   wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req));
 });
 
-wss.on('connection', (ws) => {
+wss.on('connection', (ws, req) => {
+  const ip = clientIp(req);
+  const origin = String(req.headers.origin ?? '').replace(/\/$/, '').slice(0, 200) || null;
   ws.alive = true;
   ws.budget = config.messageBudget; // messages allowed per 5 seconds
   let room = null;
@@ -251,11 +265,24 @@ wss.on('connection', (ws) => {
       if (!found) return reply({ t: 'fatal', code: 'no-room', m: 'That room does not exist (or it expired).' });
       const token = String(msg.token ?? '');
       if (token.length < 16 || token.length > 128) return reply({ t: 'fatal', code: 'bad-token', m: 'Bad session.' });
-      const result = rooms.connect(found, { token, name: msg.name }, ws);
+      const claim = msg.claim && claimLimit(ip) ? String(msg.claim) : null;
+      const result = rooms.connect(found, { token, name: msg.name, claim, origin }, ws);
+      if (msg.claim) reply({ t: 'claim', ok: Boolean(result.claimed) });
       if (result.error) return reply({ t: 'fatal', code: result.code, m: result.error });
       room = found;
       player = result.player;
       rooms.broadcast(room);
+      return;
+    }
+
+    // The page was hidden or shown: decides whether a turn needs a notification.
+    if (msg.t === 'vis' && player && room) {
+      if (room.players.has(player.id)) rooms.setVisible(room, player, ws, msg.v);
+      return;
+    }
+    // A code that moves this seat to another browser. Sent to this socket only.
+    if (msg.t === 'seat' && player && room) {
+      if (room.players.has(player.id) && player.sockets.has(ws)) reply({ t: 'seat', ...rooms.seatCode(room, player, { forLink: Boolean(msg.link) }) });
       return;
     }
 
@@ -301,6 +328,8 @@ setInterval(() => {
 setInterval(() => rooms.sweep(), 10 * 60_000).unref();
 
 // ───────────────────────── start / stop ─────────────────────────
+
+push.loadKeys();
 
 server.listen(config.port, config.host, () => {
   log.info(`${config.siteName} is listening on http://${config.host}:${config.port}${config.basePath || ''}`);

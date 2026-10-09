@@ -8,7 +8,11 @@
   <meta name="description" content="The card game Swipe for 2 to 24 players. Create a room, share the link, play in the browser.">
   <meta name="theme-color" content="#1a1714">
   <link rel="icon" href="icon.svg" type="image/svg+xml">
-  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="manifest" href="manifest.webmanifest" id="manifest">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="{{SITE_NAME}}">
   <link rel="preload" href="fonts/archivo-latin.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="preload" href="fonts/besley-latin.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="css/style.css">
@@ -31,6 +35,7 @@
         </label>
         <button class="btn btn-primary btn-large" type="submit">Create a room</button>
       </form>
+      <p class="home-back" id="home-back" hidden></p>
       <form id="join-form" class="home-form home-join">
         <label class="field">
           <span>Have a room code?</span>
@@ -117,6 +122,7 @@
         <input id="name-input" type="text" maxlength="20" autocomplete="nickname" required>
       </label>
       <div class="dialog-actions">
+        <button class="link" type="button" data-act="have-seat" id="name-seat">Already playing in another browser?</button>
         <button class="btn btn-primary" type="submit" id="name-submit">Join room</button>
       </div>
     </form>
@@ -161,6 +167,7 @@
       <p>Play <strong>one to four cards of the same rank</strong> onto the pile. They have to be <strong>equal to or lower</strong> than the card on top. From low to high the order is A, 2, 3, 4, 5, 6, 7, 8, 9, J, Q, K. Suits never matter.</p>
       <p>You may play a higher card, but then you <strong>pick up the whole pile</strong> first and your cards start a new one.</p>
       <p>Cards from your hand and your face-up row can go down together if they match.</p>
+      <p>If the host has set a <strong>turn clock</strong> and it runs out on you, you are skipped: nothing is played, and you draw 3 cards from the ones nobody was dealt. If you had nothing you could have played, you draw 3 or as many cards as are in the pile, whichever is more.</p>
       <h3>The swipe</h3>
       <p>The pile is swiped off the table, out of the game, when:</p>
       <ul>
@@ -174,6 +181,9 @@
       <h3>Scoring</h3>
       <p>Aces are 1. Two to nine are face value. Jacks, queens and kings are 10. Tens are 20, so don’t get caught holding them.</p>
       <p>Scores carry over from game to game. The match ends when someone reaches the points limit (100 unless the host changes it), and the lowest total wins. The first lead goes to the highest hand; after that, whoever went out leads the next game.</p>
+      <h3>Notifications and the app</h3>
+      <p>Swipe can tell you when it’s your turn, even with your phone locked. Turn it on under <strong>Room settings</strong>. On an iPhone or iPad this only works once Swipe is on your Home Screen: tap Share, then <em>Add to Home Screen</em>, and open it from there. Do that from inside a room and your seat comes with you.</p>
+      <p>To carry on in a different browser or on another device, ask for a <strong>seat code</strong> in Room settings and enter it there.</p>
       <h3>The cards</h3>
       <p>Two decks are shuffled together for up to 4 players, and one more for every two players after that. Everyone is dealt 20 cards; the rest sit the game out.</p>
     </div>

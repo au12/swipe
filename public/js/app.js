@@ -7,6 +7,7 @@ import { buzz, play as sfx, setSound, soundOn } from './sound.js';
 import { backHTML, faceHTML, flipHTML } from './cards.js';
 import { TEN, judge } from './rules.js';
 import * as fx from './fx.js';
+import * as push from './push.js';
 import {
   colorOf,
   fitHand,
@@ -52,7 +53,12 @@ const ui = {
   mat: null,
   sending: false,
   blindSlot: null,
+  push: 'off', // what this browser can do about notifications (push.support())
+  seatCode: null, // { code, until }: a code on show in Room settings
 };
+
+// Seat codes arrive in answer to a request; this remembers what each was wanted for.
+const seatWanted = [];
 
 const send = (action, data) => conn?.send(action, data);
 const api = (path) => new URL(path, document.baseURI).toString();
@@ -107,7 +113,19 @@ function boot() {
   hydrateIcons();
   bindGlobal();
   sizeCards();
+  push.init(cfg.pushKey).then(() => {
+    ui.push = push.support();
+    if (state) refreshPushUi();
+  });
   const code = currentRoomCode();
+  // An app put on an iPhone's Home Screen from inside a room always starts at
+  // that room, with the seat code it was installed with. The code is good
+  // once; on every later launch, go to the front door instead.
+  const launchSeat = new URLSearchParams(location.search).get('seat');
+  if (code && launchSeat && push.standalone()) {
+    if (store.get('seatUsed') === launchSeat) return location.replace(api('.'));
+    store.set('seatUsed', launchSeat);
+  }
   if (code) enterRoom(code);
   else showHome();
 }
@@ -213,6 +231,19 @@ function showHome() {
   $('#create-password-row').hidden = !cfg.needsPassword;
   homeTable();
 
+  // Opened from the Home Screen, or just come back: offer the room you were last in.
+  const last = store.get('room');
+  if (last) {
+    fetch(api(`api/rooms/${encodeURIComponent(last)}`))
+      .then((res) => {
+        if (!res.ok) return;
+        const el = $('#home-back');
+        el.innerHTML = `<a class="btn btn-large" href="${esc(api(`r/${encodeURIComponent(last)}`))}">Back to ${esc(last)}</a>`;
+        el.hidden = false;
+      })
+      .catch(() => {});
+  }
+
   $('#create-form').addEventListener('submit', async (event) => {
     event.preventDefault();
     const button = event.target.querySelector('button');
@@ -255,6 +286,7 @@ function askName({ rename = false } = {}) {
   const dialog = $('#dlg-name');
   dialog.dataset.rename = rename ? '1' : '';
   $('#name-submit').textContent = rename ? 'Save name' : 'Join room';
+  $('#name-seat').hidden = rename;
   $('#name-input').value = store.get('name', '');
   if (!dialog.open) dialog.showModal();
   $('#name-input').select();
@@ -267,6 +299,14 @@ function enterRoom(code) {
   document.title = `${code} | ${cfg.siteName}`;
   ui.tableView = store.get('tableView', 'turn') === 'me' ? 'me' : 'turn';
   ui.handView = store.get('handView', 'turn') === 'me' ? 'me' : 'turn';
+
+  // A link that carries a seat code (the Home Screen app's first launch) claims that seat.
+  const params = new URLSearchParams(location.search);
+  const claim = params.get('seat');
+  if (claim) {
+    history.replaceState(null, '', location.pathname);
+    return connect(code, store.get('name') ?? '', claim);
+  }
 
   const name = store.get('name');
   if (name) return connect(code, name);
@@ -286,13 +326,20 @@ function roomMissing() {
   );
 }
 
-function connect(code, name) {
+function connect(code, name, claim = null) {
   conn?.close();
   conn = new Connection({
     room: code,
     token: token(),
     name,
+    claim,
     onState,
+    onJoin: joined,
+    onSeat: gotSeatCode,
+    onClaim: (ok) => {
+      if (ok) toast('Your seat has moved to this browser.');
+      else toast('That seat code didn’t work. It may have expired or been used already.', { error: true });
+    },
     onError: (message) => {
       ui.sending = false;
       sfx('error');
@@ -302,10 +349,13 @@ function connect(code, name) {
     onStatus: (up) => ($('#conn-banner').hidden = up),
     onFatal: (kind, message) => {
       const home = homeLink();
+      // Whatever was open belongs to a room this browser is no longer in.
+      for (const dialog of $$('dialog[open]')) if (!(kind === 'name' && dialog.id === 'dlg-name')) dialog.close();
       if (kind === 'name') return askName();
       if (kind === 'no-room') return roomMissing();
       if (kind === 'locked') return notice('This room is locked', 'Ask the host to unlock it, then reload this page.', `<button class="btn btn-primary" data-act="reload">Try again</button>${home}`);
       if (kind === 'full') return notice('This room is full', message, home);
+      if (kind === 'moved') return notice('Your seat has moved', 'This game is now open in another browser, with your cards and your score. To come back here, ask for a seat code there.', home);
       return notice('You’re out of this room', message, home);
     },
   });
@@ -354,6 +404,7 @@ async function step(next, hurry) {
 
   if (showy && sameGame && ev.kind === 'play') await showPlay(prev, next, ev);
   else if (showy && sameGame && ev.kind === 'flip') await showFlip(prev, next, ev);
+  else if (showy && sameGame && ev.kind === 'skip') await showSkip(prev, ev);
 
   const dealing = fresh && ev.kind === 'deal' && r.phase === 'deal';
   commit(next, { dealing: dealing && !hurry });
@@ -369,6 +420,9 @@ function commit(next, { dealing = false } = {}) {
   state = next;
   me = next.players.find((p) => p.id === next.you);
   ui.sending = false;
+  // A seat that arrived by code brings its name with it.
+  if (!store.get('name')) store.set('name', me.name);
+  if (store.get('room') !== next.code) store.set('room', next.code);
 
   const r = next.round;
   // Keep only selections that are still playable; a flipped blind card is always in.
@@ -409,7 +463,7 @@ function renderAll({ dealing = false, turnChanged = false } = {}) {
   document.documentElement.style.setProperty('--on-me', onColor(me.color));
 
   renderRails(state, me);
-  if (phase === 'lobby') renderLobby(state, me);
+  if (phase === 'lobby') renderLobby(state, me, ui);
   if (phase === 'results') renderResults(state, me);
   if (phase === 'game') {
     const r = state.round;
@@ -601,6 +655,44 @@ async function showFlip(prev, next, ev) {
   if (!slot) toast(`${who(next, me, ev.by)} flipped a blind ${ev.card.r}.`);
 }
 
+/** Somebody's clock ran out: everyone gets the banner, and it is not a friendly one. */
+async function showSkip(prev, ev) {
+  const mine = ev.by === me.id;
+  const name = playerOf(prev, ev.by)?.name ?? 'Someone';
+  sfx('skip');
+  buzz(mine ? [90, 50, 90, 50, 220] : [50, 40, 50]);
+  for (const dialog of $$('#dlg-blind[open]')) dialog.close();
+  const drew = ev.drew ?? 0;
+  const banner = fx.skipped({
+    sub: mine ? 'You ran out of time' : `${esc(name)} ran out of time`,
+    penalty: drew ? `+${drew} ${drew === 1 ? 'card' : 'cards'}` : '',
+    shake: $('#mat'),
+  });
+  if (!drew || reducedMotion()) return banner;
+
+  // The penalty cards drop in from above the banner, face down, into the hand
+  // if it is on screen and otherwise onto the player's chip.
+  await sleep(260);
+  const toHand = $('#hand')?.dataset.pid === ev.by;
+  const target = toHand ? fx.rectOf($('#handzone')) : anchorOf(ev.by);
+  const cw = cardWidth();
+  const backs = (ev.backs ?? []).slice(0, 14);
+  const flights = backs.map((b, i) => {
+    const spread = (i - (backs.length - 1) / 2) * cw * 0.5;
+    const from = { x: window.innerWidth / 2 - cw / 2 + spread, y: -cw * 1.6, w: cw, h: cw * 1.4 };
+    const to = toHand
+      ? { x: target.x + target.w / 2 - cw / 2 + spread * 0.6, y: target.y + target.h / 2 - cw * 0.7, w: cw, h: cw * 1.4, rot: (i % 2 ? 1 : -1) * 4 }
+      : { ...fx.cardRectAt(target, cw * 0.4), rot: 0 };
+    const g = fx.ghost(backHTML(b), from);
+    setTimeout(() => sfx('deal'), i * 70 + 200);
+    return fx.fly(g, from, to, { delay: i * 70, duration: 420, rot0: (i % 2 ? -1 : 1) * 25, fade: !toHand, easing: 'cubic-bezier(.5,0,.6,1)' }).then(() => g);
+  });
+  setTimeout(() => fx.floatLabel(`+${drew}`, target, '#e3101e'), 320);
+  const landed = await Promise.all(flights);
+  await banner;
+  landed.forEach((g) => g.remove());
+}
+
 /** The opening: the wash, then your own eight table cards and your hand are dealt to you. */
 async function showDeal(s) {
   const r = s.round;
@@ -741,7 +833,7 @@ function renderSettings() {
   const s = state.settings;
   const isHost = me.id === state.hostId;
   const live = isLive(state);
-  const sig = JSON.stringify([s, isHost, live, state.locked, Boolean(state.match)]);
+  const sig = JSON.stringify([s, isHost, live, state.locked, Boolean(state.match), ui.push, state.notify, push.blocked(), push.canInstall(), ui.seatCode, document.documentElement.dataset.theme]);
   const body = $('#settings-body');
   if (sig === settingsSig) return;
   // Don't yank the number out from under someone who is typing.
@@ -758,13 +850,26 @@ function renderSettings() {
           <div class="seg" role="radiogroup">${LIMIT_CHOICES.map((v) => `<label><input type="radio" name="limitPreset" value="${v}"${v === s.limit ? ' checked' : ''}${off}><span>${v}</span></label>`).join('')}</div>
           <input id="set-limit" name="limit" type="number" inputmode="numeric" min="20" max="1000" step="5" value="${s.limit}"${off} aria-label="Points limit">
         </div></div>
-      <div class="set-row"><div><label for="set-clock">Turn clock</label><small>When it runs out, the turn is played automatically.</small></div>
+      <div class="set-row"><div><label for="set-clock">Turn clock</label><small>When it runs out, that player is skipped and draws 3 cards. With nothing to play, they draw as many as the pile holds if that is more.</small></div>
         <select id="set-clock" name="turnSeconds"${off}>${CLOCK_CHOICES.map((t) => `<option value="${t}"${t === s.turnSeconds ? ' selected' : ''}>${t === 0 ? 'Off' : formatClock(t * 1000)}</option>`).join('')}</select></div>
     </section>
     <section class="set-group">
       <h3>This device</h3>
       <div class="set-row"><div><label>Appearance</label></div>
         <button type="button" class="btn btn-small" data-act="theme">${document.documentElement.dataset.theme === 'dark' ? 'Switch to light' : 'Switch to dark'}</button></div>
+      ${notifyRow()}
+      ${
+        push.canInstall()
+          ? `<div class="set-row"><div><label>Install</label><small>Puts Swipe on this device like an app, in a window of its own.</small></div>
+              <button type="button" class="btn btn-small" data-act="install">Install Swipe</button></div>`
+          : ''
+      }
+      <div class="set-row"><div><label>Another browser</label><small>A seat code moves your seat, cards and score to a different browser or device. It works once, within 15 minutes.</small></div>
+        <div class="set-actions set-actions-end">
+          <button type="button" class="btn btn-small" data-act="seat-code">${ui.seatCode ? 'New code' : 'Show a seat code'}</button>
+          <button type="button" class="btn btn-small" data-act="have-seat">Enter a code</button>
+        </div></div>
+      ${ui.seatCode ? `<p class="seat-code" aria-live="polite"><b>${esc(ui.seatCode.code.slice(0, 4))}-${esc(ui.seatCode.code.slice(4))}</b><span>Open this room in the other browser and choose “Already playing in another browser?”</span></p>` : ''}
     </section>
     ${
       isHost
@@ -780,6 +885,98 @@ function renderSettings() {
           </section>`
         : ''
     }`;
+}
+
+/** The "Turn notifications" row: what it offers depends on the browser and on what is already on. */
+function notifyRow() {
+  if (ui.push === 'off') return '';
+  const row = (hint, control) => `<div class="set-row"><div><label>Turn notifications</label><small>${hint}</small></div>${control}</div>`;
+  if (ui.push === 'install') {
+    return row('On an iPhone or iPad these need Swipe on your Home Screen. Tap the Share button, then <b>Add to Home Screen</b>, and open Swipe from there. Your seat comes with you.', '');
+  }
+  if (ui.push === 'none') return row('This browser can’t show notifications.', '');
+  if (state.notify && push.wanted()) {
+    return row(
+      'On. You’ll hear when it’s your turn and you’re not looking, even with this device locked.',
+      `<div class="set-actions set-actions-end"><button type="button" class="btn btn-small" data-act="push-test">Send a test</button><button type="button" class="btn btn-small" data-act="push-off">Turn off</button></div>`,
+    );
+  }
+  if (push.blocked()) return row('Blocked for this site. Allow notifications in your browser’s settings, then come back here.', '');
+  return row('Hear when it’s your turn, even with this device locked.', '<button type="button" class="btn btn-small btn-you" data-act="push-on">Turn on</button>');
+}
+
+// ───────────────────────── notifications and seats ─────────────────────────
+
+function refreshPushUi() {
+  if ($('#dlg-settings').open) renderSettings();
+  if (state && phaseOf(state) === 'lobby') renderLobby(state, me, ui);
+}
+
+/** Runs once each time the connection to a room is made. */
+function joined() {
+  ui.push = push.support();
+  // Notifications turned on in this browser follow you from room to room without asking again.
+  push.resume().then((sub) => sub && send('push', { sub }));
+  push.clearShown(`swipe-${state?.code ?? currentRoomCode()}`);
+  // In a Safari tab on an iPhone, keep a seat code tucked into the "Add to
+  // Home Screen" link, so the installed app opens in this room as you.
+  if (push.isIOS() && !push.standalone()) carrySeat();
+}
+
+function carrySeat() {
+  const room = currentRoomCode();
+  const point = (code) => ($('#manifest').href = api(`manifest.webmanifest?room=${encodeURIComponent(room)}&seat=${encodeURIComponent(code)}`));
+  // One code per room, kept for this tab: asking again on every reconnect
+  // would push out the code an already-installed app is waiting to use.
+  try {
+    const kept = JSON.parse(sessionStorage.getItem('sw.carry') ?? 'null');
+    if (kept && kept.room === room && kept.until - Date.now() > 3600_000) return point(kept.code);
+  } catch {}
+  seatWanted.push((seat) => {
+    try {
+      sessionStorage.setItem('sw.carry', JSON.stringify({ room, code: seat.code, until: seat.until }));
+    } catch {}
+    point(seat.code);
+  });
+  conn?.raw({ t: 'seat', link: true });
+}
+
+function gotSeatCode(seat) {
+  const wanted = seatWanted.shift();
+  if (typeof wanted === 'function') return wanted(seat);
+  ui.seatCode = seat;
+  clearTimeout(gotSeatCode.timer);
+  gotSeatCode.timer = setTimeout(() => {
+    ui.seatCode = null;
+    refreshPushUi();
+  }, Math.max(0, seat.until - (Date.now() + clockOffset)));
+  refreshPushUi();
+  $('.seat-code')?.scrollIntoView({ block: 'nearest' });
+}
+
+async function turnOnNotifications() {
+  if (ui.push === 'install' || ui.push === 'none') {
+    settingsSig = '';
+    renderSettings();
+    if (!$('#dlg-settings').open) $('#dlg-settings').showModal();
+    return;
+  }
+  try {
+    const sub = await push.enable();
+    send('push', { sub });
+    setTimeout(() => send('pushTest'), 600);
+    toast('Turn notifications are on. A test is on its way.');
+  } catch (err) {
+    toast(err.message, { error: true });
+  }
+  refreshPushUi();
+}
+
+function enterSeatCode() {
+  const code = window.prompt('Seat code from your other browser:');
+  if (!code || !code.trim()) return;
+  for (const id of ['dlg-name', 'dlg-settings']) if ($(`#${id}`).open) $(`#${id}`).close();
+  connect(currentRoomCode(), store.get('name') ?? '', code.trim());
 }
 
 function onSettingsChange(event) {
@@ -867,6 +1064,21 @@ function bindGlobal() {
         settingsSig = '';
         renderSettings();
         return $('#dlg-settings').showModal();
+      case 'push-on':
+        return turnOnNotifications();
+      case 'push-off':
+        send('push', { sub: null });
+        return push.disable().then(refreshPushUi);
+      case 'push-test':
+        send('pushTest');
+        return toast('Sent. If nothing shows up, check this device’s notification settings for Swipe.');
+      case 'install':
+        return push.install().then(refreshPushUi);
+      case 'seat-code':
+        seatWanted.push('show');
+        return conn?.raw({ t: 'seat' });
+      case 'have-seat':
+        return enterSeatCode();
       case 'rename':
         return askName({ rename: true });
       case 'invite':
@@ -985,6 +1197,11 @@ function bindGlobal() {
     }, 80);
   });
   document.addEventListener('visibilitychange', updateTitle);
+  // Back in front of the game: its notification has done its job.
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && state) push.clearShown(`swipe-${state.code}`);
+  });
+  window.addEventListener('swipe:installable', () => state && refreshPushUi());
 }
 
 boot();

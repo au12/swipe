@@ -154,6 +154,15 @@ const SOUNDS = {
     tone(ac, { freq: 1568, start: 0.55, dur: 0.6, type: 'sine', gain: 0.06 });
   },
   lose: (ac) => [392, 349, 294, 262].forEach((f, i) => tone(ac, { freq: f, start: i * 0.15, dur: 0.32, type: 'sine', gain: 0.1 })),
+  // Skipped: a slammed door, then a buzzer that drops through the floor.
+  skip: (ac) => {
+    hiss(ac, { dur: 0.09, freq: 900, q: 0.5, gain: 0.3, type: 'lowpass', attack: 0.002 });
+    tone(ac, { freq: 70, to: 38, dur: 0.3, type: 'sine', gain: 0.3, attack: 0.003 });
+    [0.1, 0.43].forEach((start, i) => {
+      tone(ac, { freq: i ? 98 : 116, to: i ? 62 : 104, start, dur: i ? 0.62 : 0.26, type: 'sawtooth', gain: 0.1 });
+      tone(ac, { freq: i ? 104 : 123, to: i ? 66 : 110, start, dur: i ? 0.62 : 0.26, type: 'square', gain: 0.05 }); // a hair off pitch, so it grinds
+    });
+  },
   // A score ticking up on the results board.
   count: (ac) => tone(ac, { freq: 1400, dur: 0.025, type: 'square', gain: 0.025 }),
 };
