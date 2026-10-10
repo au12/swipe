@@ -359,22 +359,47 @@ input:focus-visible, textarea:focus-visible, select:focus-visible { outline-offs
 /* The pile. */
 .pilezone { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: clamp(8px, 3vw, 22px); }
 .pile {
-  --pw: calc(var(--cw) * 1.16); --depth: 0px;
+  --pw: calc(var(--cw) * 1.16);
   position: relative; width: var(--pw); height: calc(var(--pw) * 1.4);
-  margin: calc(var(--pw) * 0.14) calc(var(--pw) * 0.42) calc(var(--pw) * 0.14 + var(--depth));
+  margin: calc(var(--pw) * 0.26) calc(var(--pw) * 0.44);
 }
 .pile .card { --cw: var(--pw); }
+/* Each card: a hairline of edge on the side nearest you, and a close shadow on
+   whatever it rests on. Both are given in the card's own turned frame (view.js
+   works out --ex/--ey and --lx/--ly), so they point the same way for every card. */
 .pile-card {
   position: absolute; inset: 0; width: 100%; height: 100%;
-  transform: translate(calc(var(--x, 0) * var(--pw)), calc(var(--y, 0) * var(--pw))) rotate(var(--rot, 0deg));
+  transform: translate(calc(var(--x, 0) * var(--pw)), calc(var(--y, 0) * var(--pw))) rotate(var(--rot, 0deg)) scale(var(--k, 1));
   transition: transform 0.28s cubic-bezier(0.2, 0.8, 0.25, 1);
+  box-shadow:
+    calc(var(--ex, 0) * var(--pw) * 0.016) calc(var(--ey, 1) * var(--pw) * 0.016) 0 var(--card-edge),
+    0 0 0 1px rgba(0, 0, 0, 0.2),
+    calc(var(--lx, 0) * var(--pw) * 0.03) calc(var(--ly, 1) * var(--pw) * 0.03) calc(var(--pw) * 0.045) rgba(0, 0, 0, 0.3);
 }
-.pile-card.is-base { box-shadow: 0 calc(var(--pw) * 0.03 + var(--depth)) 0 var(--card-edge), 0 calc(var(--depth) + 6px) 14px rgba(0, 0, 0, 0.35), 0 0 0 1px rgba(0, 0, 0, 0.16); }
-.pile-card.is-top { box-shadow: 0 calc(var(--pw) * 0.03) 0 var(--card-edge), 0 0 0 1px rgba(0, 0, 0, 0.2), 0 3px 8px rgba(0, 0, 0, 0.22); }
+.pile-card.is-top {
+  box-shadow:
+    calc(var(--ex, 0) * var(--pw) * 0.02) calc(var(--ey, 1) * var(--pw) * 0.02) 0 var(--card-edge),
+    0 0 0 1px rgba(0, 0, 0, 0.2),
+    calc(var(--lx, 0) * var(--pw) * 0.035) calc(var(--ly, 1) * var(--pw) * 0.035) calc(var(--pw) * 0.06) rgba(0, 0, 0, 0.34);
+}
+/* What the pile casts on the mat: one soft-edged shape per card, pushed away
+   from the light and blurred in step with that card's height (view.js). */
+.pile-shades { position: absolute; inset: 0; pointer-events: none; transition: opacity 0.16s ease; }
+.pile.is-clearing .pile-shades { opacity: 0; }
+.pile-cast { position: absolute; inset: 0; } /* faded as one, so overlapping shadows don't add up */
+.pile-shade {
+  --b: calc(var(--pw) * var(--blur, 0.02));
+  position: absolute; inset: calc(var(--b) * 0.5); border-radius: calc(var(--pw) * 0.07);
+  background: rgba(0, 0, 0, var(--a, 1));
+  box-shadow: 0 0 var(--b) calc(var(--b) * 0.5) rgba(0, 0, 0, var(--a, 1));
+  transform: translate(calc(var(--x, 0) * var(--pw)), calc(var(--y, 0) * var(--pw))) rotate(var(--rot, 0deg));
+}
+/* The pool of shade round the foot of the pile reaches a little past the cards on every side. */
+.pile-shade.is-pool { inset: calc(var(--b) * 0.5 - var(--pw) * var(--grow, 0.06)); border-radius: calc(var(--pw) * 0.24); }
 .pile.is-hot .pile-card.is-top { box-shadow: 0 0 0 3px #fff, 0 0 26px 6px rgba(255, 255, 255, 0.75); }
 .pile-empty { position: absolute; inset: 0; border-radius: calc(var(--pw) * 0.07); border: 2px dashed rgba(255, 255, 255, 0.35); background: rgba(0, 0, 0, 0.14); }
 
-.pile-side { display: grid; gap: 6px; justify-items: start; align-content: center; min-width: 0; }
+.pile-side { display: grid; gap: 6px; justify-items: start; align-content: center; min-width: 0; position: relative; z-index: 1; } /* above a card that strays its way */
 .pile-side-left { justify-items: end; text-align: right; }
 .pile-count { display: inline-grid; justify-items: center; padding: 5px 12px 6px; border-radius: 12px; background: rgba(0, 0, 0, 0.3); border: 1.5px solid rgba(255, 255, 255, 0.26); }
 .pile-count b { font-family: var(--serif); font-variant-numeric: normal; font-weight: 800; font-size: clamp(1.5rem, 6vw, 2.1rem); line-height: 1.05; }

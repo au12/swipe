@@ -17,6 +17,8 @@ import {
   matColor,
   myOpenCards,
   myTurn,
+  pileHTML,
+  pileRect,
   pileSpec,
   pileStyle,
   playerOf,
@@ -100,11 +102,11 @@ function notice(title, text, actions) {
 function sizeCards() {
   const stage = $('.stage');
   const w = Math.min(stage?.clientWidth || window.innerWidth, window.innerWidth);
-  // Top to bottom the table is about 5.2 cards tall (table cards, pile, one
+  // Top to bottom the table is about 5.5 cards tall (table cards, pile, one
   // row of hand) plus everything that isn't a card: bars, labels, buttons.
   const strip = $('#strip');
   const chrome = strip && getComputedStyle(strip).display === 'none' ? 396 : 402;
-  const byHeight = (window.innerHeight - chrome) / 5.2;
+  const byHeight = (window.innerHeight - chrome) / 5.5;
   const cw = Math.max(44, Math.min(w * 0.158, byHeight, 94));
   document.documentElement.style.setProperty('--cw', `${cw.toFixed(1)}px`);
 }
@@ -165,13 +167,8 @@ async function homeTable() {
     const top = [];
     for (let i = cards.length - 1; i >= 0 && cards[i].r === cards.at(-1).r; i--) top.unshift(cards[i]);
     const spec = pileSpec('home', cards.length, top, cards.slice(0, cards.length - top.length).map((c) => c.b));
-    pileEl.innerHTML = spec
-      .map((s, n) =>
-        s.kind === 'back'
-          ? backHTML(s.b, { cls: 'pile-card', style: pileStyle(s) })
-          : faceHTML(s.card, { cls: 'pile-card is-top', style: `${pileStyle(s)}${hideLast && n === spec.length - 1 ? ';visibility:hidden' : ''}` }),
-      )
-      .join('');
+    pileEl.classList.remove('is-clearing');
+    pileEl.innerHTML = pileHTML(spec, { hideLast });
     return spec.at(-1);
   };
 
@@ -217,6 +214,7 @@ async function homeTable() {
       { duration: 1250, fill: 'both' },
     );
     wipe.animate([{ clipPath: 'polygon(0 0, 0 0, -25% 100%, -25% 100%)' }, { clipPath: 'polygon(0 0, 125% 0, 100% 100%, -25% 100%)' }], { duration: 520, easing: 'cubic-bezier(.3,.6,.2,1)', fill: 'both' });
+    pileEl.classList.add('is-clearing'); // the shadow goes with the cards
     await fx.sweepOff($$('.pile-card', pileEl), 1);
     mat.style.setProperty('--mat', next);
     wipe.style.background = 'transparent';
@@ -601,6 +599,7 @@ async function showPlay(prev, next, ev) {
     sfx('pickup');
     if (actor === me.id) buzz([30, 40, 30]);
     fx.floatLabel(`+${ev.pickup}`, to, color);
+    $('#pile').classList.add('is-clearing'); // the shadow goes with the cards
     await fx.gatherTo($$('#pile .pile-card'), to);
     ui.pile = { count: 0, top: [], backs: [] };
     renderPile(prev, ui.pile);
@@ -626,7 +625,7 @@ async function showPlay(prev, next, ev) {
   const ghosts = ev.cards.map((card, i) => {
     const src = sources[i];
     const s = spec.find((x) => x.card?.id === card.id);
-    const to = { x: anchor.x + s.x * anchor.w, y: anchor.y + s.y * anchor.w, w: anchor.w, h: anchor.h, rot: s.rot };
+    const to = pileRect(anchor, s);
     if (src.el) src.el.style.visibility = 'hidden';
     const g = fx.ghost(src.flip ? flipHTML(card) : faceHTML(card), src.rect);
     const delay = i * 75;
@@ -647,6 +646,7 @@ async function showPlay(prev, next, ev) {
     const sub = ev.swipe === 'ten' ? 'A ten clears the pile' : 'Four of a kind';
     fx.callout('Swipe!', { color, on: onColor(color), sub });
     await sleep(reducedMotion() ? 0 : 150);
+    $('#pile').classList.add('is-clearing');
     await fx.sweepOff($$('#pile .pile-card'), 1); // the same way the band is travelling
     $('#pile').classList.remove('is-hot');
     ui.pile = { count: 0, top: [], backs: [] };

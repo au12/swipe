@@ -222,50 +222,118 @@ export function renderTable(state, me, ui) {
 
 // ───────────────────────── mat: the pile ─────────────────────────
 
+const PILE_SHOWN = 40; // buried cards that are drawn; the server sends this many backs
+const PILE_TALL = 0.56; // the tallest a pile is drawn, in card-widths
+const PILE_TILT = 0.36; // how much of its height shows as cards sitting higher up the screen
+const LIGHT = { x: 0.46, y: 0.8 }; // where a shadow falls on the mat, per card-width of height: the lamp is up and to the left
+
+/**
+ * How far off the mat the card `i` from the bottom rests, in card-widths.
+ * A real card is far thinner than this, or a pile of ten would look like a
+ * pile of one. It climbs quickly at first and more slowly after, so three
+ * cards against fifteen is as plain to see as fifteen against sixty.
+ */
+const pileHeight = (i) => Math.min(PILE_TALL, 0.07 * Math.sqrt(i));
+
 /**
  * Where every visible card of the pile sits, in card-widths from the centre.
  * Buried cards are turned face down, so the heap shows red and blue backs
- * peeking out, each with a repeatable scatter (the same card always lands the
- * same way). The cards that matter — the run on top — are face up and fanned
- * so each index can be read.
+ * peeking out, each tossed its own way: most land near the middle, a few
+ * well off it, and some nearly sideways. The scatter is repeatable (the same
+ * card always lands the same way). The cards that matter — the run on top —
+ * are face up and fanned so each index can be read.
+ *
+ * Every card also has a height `z`. The higher a card is, the higher up the
+ * screen it sits (as a heap does seen from a chair, not from the ceiling), the
+ * slightly larger it is drawn, and the further and softer its shadow falls.
+ * `gx`/`gy` is the spot on the mat directly beneath it, and `floor` how far
+ * down the screen the mat under the middle of the pile is.
  *
  * `backs` lists the back colours of the buried cards, ending with the one
  * directly under the top run. It may be shorter than the pile is deep.
  */
 export function pileSpec(roundId, count, top, backs = []) {
   const under = Math.max(0, count - top.length);
-  const shown = Math.min(under, backs.length, 16);
+  const shown = Math.min(under, backs.length, PILE_SHOWN);
+  const tallest = pileHeight(Math.max(0, count - 1));
+  const place = (s) => {
+    const z = pileHeight(s.i);
+    return { ...s, z, k: 1 + z * 0.14, floor: (PILE_TILT * tallest) / 2, gx: s.x, gy: s.y + (PILE_TILT * tallest) / 2, y: s.y - PILE_TILT * (z - tallest / 2) };
+  };
   const out = [];
   for (let i = under - shown; i < under; i++) {
     const rnd = seeded(`${roundId}:${i}`);
-    out.push({ kind: 'back', i, b: backs[backs.length - (under - i)], x: (rnd() - 0.5) * 0.36, y: (rnd() - 0.5) * 0.2, rot: (rnd() - 0.5) * 44 });
+    const bell = () => (rnd() + rnd() + rnd()) / 3 - 0.5; // -0.5 to 0.5, mostly near the middle
+    const x = bell() * 1.02;
+    const y = bell() * 0.6;
+    // Most cards land roughly square; two in five were tossed and lie any way round.
+    const rot = rnd() < 0.4 ? (rnd() - 0.5) * 180 : bell() * 130;
+    out.push(place({ kind: 'back', i, b: backs[backs.length - (under - i)], x, y, rot }));
   }
   const n = top.length;
   top.forEach((card, j) => {
     const rnd = seeded(`${roundId}:${under + j}:top`);
     const k = j - (n - 1) / 2;
-    out.push({ kind: 'face', i: under + j, card, x: k * 0.3 + (rnd() - 0.5) * 0.04, y: (rnd() - 0.5) * 0.08, rot: k * 7 + (rnd() - 0.5) * 7 });
+    out.push(place({ kind: 'face', i: under + j, card, x: k * 0.3 + (rnd() - 0.5) * 0.06, y: (rnd() - 0.5) * 0.1, rot: k * 7 + (rnd() - 0.5) * 9 }));
   });
   return out;
 }
 
-export const pileStyle = (s) => `--x:${s.x.toFixed(3)};--y:${s.y.toFixed(3)};--rot:${s.rot.toFixed(1)}deg`;
+/**
+ * A pile card's place, plus what its own shadows need. A box-shadow turns
+ * with its card, so the card's thin edge (which always shows on the side
+ * nearest you) and the shadow it leaves on the cards beneath (which always
+ * falls away from the light) are worked out here against its rotation.
+ */
+export function pileStyle(s) {
+  const rad = (s.rot * Math.PI) / 180;
+  const sin = Math.sin(rad);
+  const cos = Math.cos(rad);
+  const f = (n, d = 3) => n.toFixed(d);
+  return `--x:${f(s.x)};--y:${f(s.y)};--rot:${f(s.rot, 1)}deg;--k:${f(s.k ?? 1)};--ex:${f(sin)};--ey:${f(cos)};--lx:${f(0.32 * cos + 0.95 * sin)};--ly:${f(0.95 * cos - 0.32 * sin)}`;
+}
+
+/** Where a pile card is on screen, given where the pile is: the place a card flying to the pile should land. */
+export function pileRect(anchor, s) {
+  const k = s.k ?? 1;
+  return { x: anchor.x + s.x * anchor.w - ((k - 1) * anchor.w) / 2, y: anchor.y + s.y * anchor.w - ((k - 1) * anchor.h) / 2, w: anchor.w * k, h: anchor.h * k, rot: s.rot };
+}
+
+/**
+ * The pile's markup: first what it casts on the mat, then the cards.
+ *
+ * Each card throws its own shadow, offset and blurred in step with its height.
+ * They are drawn solid and faded as one group, so where they overlap the mat
+ * gets no darker: together they are a single shadow, crisp where the pile
+ * meets the mat and long and soft where its top overhangs. A few cards barely
+ * mark the mat; sixty of them stand in their own shade.
+ */
+export function pileHTML(spec, { hideLast = false } = {}) {
+  if (!spec.length) return '';
+  const f = (n) => n.toFixed(3);
+  const tallest = spec.at(-1).z;
+  const shade = (s) => `<i class="pile-shade" style="--x:${f(s.gx + LIGHT.x * s.z)};--y:${f(s.gy + LIGHT.y * s.z)};--rot:${s.rot.toFixed(1)}deg;--blur:${f(0.014 + 0.4 * s.z)}"></i>`;
+  // Under everything, the shade a heap gathers round its foot: wider and deeper the taller it stands.
+  const pool = `<i class="pile-shade is-pool" style="--x:${f(LIGHT.x * tallest * 0.35)};--y:${f(spec[0].floor + LIGHT.y * tallest * 0.35)};--rot:0deg;--blur:${f(0.1 + 0.5 * tallest)};--grow:${f(0.05 + 0.26 * tallest)};--a:${f(Math.min(0.3, 0.08 + 0.45 * tallest))}"></i>`;
+  const shades = spec.map((s, n) => (hideLast && n === spec.length - 1 ? '' : shade(s))).join('');
+  const cards = spec
+    .map((s, n) => {
+      const style = `${pileStyle(s)}${hideLast && n === spec.length - 1 ? ';visibility:hidden' : ''}`;
+      return s.kind === 'back' ? backHTML(s.b, { cls: 'pile-card', style }) : faceHTML(s.card, { cls: 'pile-card is-top', style });
+    })
+    .join('');
+  // A taller pile keeps more of the lamp off the mat, so its shadow is deeper as well as longer.
+  const depth = Math.min(0.5, 0.28 + 0.4 * tallest);
+  return `<div class="pile-shades" aria-hidden="true">${pool}<div class="pile-cast" style="opacity:${f(depth)}">${shades}</div></div>${cards}`;
+}
 
 export function renderPile(state, pile) {
   const r = state.round;
   const el = $('#pile');
+  el.classList.remove('is-clearing');
   if (!r) return (el.innerHTML = '');
   const spec = pileSpec(r.id, pile.count, pile.top, pile.backs);
-  el.style.setProperty('--depth', `${Math.min(9, Math.floor(pile.count / 6))}px`);
-  el.innerHTML =
-    (pile.count === 0 ? '<span class="pile-empty"></span>' : '') +
-    spec
-      .map((s, n) =>
-        s.kind === 'back'
-          ? backHTML(s.b, { cls: `pile-card${n === 0 ? ' is-base' : ''}`, style: pileStyle(s) })
-          : faceHTML(s.card, { cls: `pile-card is-top${n === 0 ? ' is-base' : ''}`, style: pileStyle(s) }),
-      )
-      .join('');
+  el.innerHTML = (pile.count === 0 ? '<span class="pile-empty"></span>' : '') + pileHTML(spec);
 
   const top = pile.top.at(-1)?.r ?? null;
   const run = pile.top.length;

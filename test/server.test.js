@@ -205,7 +205,7 @@ test('the pile is sent as a face-up top and face-down cards beneath it', async (
     for (const c of all) {
       const pile = c.state.round.pile;
       const under = pile.count - pile.top.length;
-      assert.equal(pile.backs.length, Math.min(under, 16));
+      assert.equal(pile.backs.length, Math.min(under, 40));
       assert.ok(pile.backs.every((b) => b === 0 || b === 1), 'buried cards arrive as backs only');
       assert.ok(pile.top.every((card) => card.r === pile.top[0].r), 'the top run is one rank');
     }
