@@ -3,7 +3,7 @@
 // pile), the hand, the action bar, the lobby, the results and the side rails.
 // Nothing in here talks to the server or starts an animation.
 
-import { $, esc, formatClock, icon, initials, onColor, plural, possessive, seeded } from './util.js';
+import { $, LIGHT, esc, formatClock, icon, initials, onColor, plural, possessive, seeded } from './util.js';
 import { backHTML, faceHTML } from './cards.js';
 import { TEN, judge, order, points, rankName } from './rules.js';
 
@@ -239,7 +239,6 @@ export function renderTable(state, me, ui) {
 const PILE_SHOWN = 40; // buried cards that are drawn; the server sends this many backs
 const PILE_TALL = 0.56; // the tallest a pile is drawn, in card-widths
 const PILE_TILT = 0.36; // how much of its height shows as cards sitting higher up the screen
-const LIGHT = { x: 0.46, y: 0.8 }; // where a shadow falls on the mat, per card-width of height: the lamp is up and to the left
 
 /**
  * How far off the mat the card `i` from the bottom rests, in card-widths.
@@ -322,29 +321,49 @@ export function pileRect(anchor, s) {
  * meets the mat and long and soft where its top overhangs. A few cards barely
  * mark the mat; sixty of them stand in their own shade.
  */
-export function pileHTML(spec, { hideLast = false } = {}) {
+export function pileHTML(spec) {
   if (!spec.length) return '';
   const f = (n) => n.toFixed(3);
   const tallest = spec.at(-1).z;
-  const shade = (s) => `<i class="pile-shade" style="--x:${f(s.gx + LIGHT.x * s.z)};--y:${f(s.gy + LIGHT.y * s.z)};--rot:${s.rot.toFixed(1)}deg;--blur:${f(0.014 + 0.4 * s.z)}"></i>`;
+  const shade = (s) => `<i class="pile-shade" style="${pileShadeStyle(s)}"></i>`;
   // Under everything, the shade a heap gathers round its foot: wider and deeper the taller it stands.
   const pool = `<i class="pile-shade is-pool" style="--x:${f(LIGHT.x * tallest * 0.35)};--y:${f(spec[0].floor + LIGHT.y * tallest * 0.35)};--rot:0deg;--blur:${f(0.1 + 0.5 * tallest)};--grow:${f(0.05 + 0.26 * tallest)};--a:${f(Math.min(0.3, 0.08 + 0.45 * tallest))}"></i>`;
-  const shades = spec.map((s, n) => (hideLast && n === spec.length - 1 ? '' : shade(s))).join('');
-  const cards = spec
-    .map((s, n) => {
-      const style = `${pileStyle(s)}${hideLast && n === spec.length - 1 ? ';visibility:hidden' : ''}`;
-      return s.kind === 'back' ? backHTML(s.b, { cls: 'pile-card', style }) : faceHTML(s.card, { cls: 'pile-card is-top', style });
-    })
-    .join('');
-  // A taller pile keeps more of the lamp off the mat, so its shadow is deeper as well as longer.
-  const depth = Math.min(0.5, 0.28 + 0.4 * tallest);
-  return `<div class="pile-shades" aria-hidden="true">${pool}<div class="pile-cast" style="opacity:${f(depth)}">${shades}</div></div>${cards}`;
+  // One shadow per card, in the same order as the cards, so each can be found and moved with its card.
+  const shades = spec.map(shade).join('');
+  const cards = spec.map((s) => (s.kind === 'back' ? backHTML(s.b, { cls: 'pile-card', style: pileStyle(s) }) : faceHTML(s.card, { cls: 'pile-card is-top', style: pileStyle(s) }))).join('');
+  return `<div class="pile-shades" aria-hidden="true">${pool}<div class="pile-cast" style="opacity:${f(pileDepth(tallest))}">${shades}</div></div>${cards}`;
+}
+
+/** A taller pile keeps more of the lamp off the mat, so its shadow is deeper as well as longer. */
+const pileDepth = (tallest) => Math.min(0.5, 0.28 + 0.4 * tallest);
+const shadeBlur = (s) => 0.014 + 0.4 * s.z; // how soft a card's shadow is, in card-widths: softer the higher the card
+
+/** Where one card's shadow lies on the mat, as the inline style of its shadow element. */
+export function pileShadeStyle(s) {
+  const f = (n) => n.toFixed(3);
+  return `--x:${f(s.gx + LIGHT.x * s.z)};--y:${f(s.gy + LIGHT.y * s.z)};--rot:${s.rot.toFixed(1)}deg;--blur:${f(shadeBlur(s))}`;
+}
+
+/**
+ * The same shadow in screen terms, given where the pile is: what the shadow
+ * of a card flying to the pile has to become by the time the card lands.
+ * `spec` is the whole pile as it will be (its height sets how dark it is).
+ */
+export function pileShadow(anchor, s, spec) {
+  return {
+    x: anchor.x + (s.gx + LIGHT.x * s.z) * anchor.w,
+    y: anchor.y + (s.gy + LIGHT.y * s.z) * anchor.w,
+    w: anchor.w,
+    h: anchor.h,
+    rot: s.rot,
+    blur: (shadeBlur(s) * anchor.w) / 2, // a box-shadow's blur is twice a filter's
+    alpha: pileDepth(spec.at(-1).z),
+  };
 }
 
 export function renderPile(state, pile) {
   const r = state.round;
   const el = $('#pile');
-  el.classList.remove('is-clearing');
   if (!r) return (el.innerHTML = '');
   const spec = pileSpec(r.id, pile.count, pile.top, pile.backs);
   el.innerHTML = (pile.count === 0 ? '<span class="pile-empty"></span>' : '') + pileHTML(spec);

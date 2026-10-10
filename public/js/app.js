@@ -21,6 +21,8 @@ import {
   myTurn,
   pileHTML,
   pileRect,
+  pileShadeStyle,
+  pileShadow,
   pileSpec,
   pileStyle,
   playerOf,
@@ -173,12 +175,11 @@ async function homeTable() {
   mat.style.setProperty('--mat', matColor(COLORS[0]));
   let id = 0;
 
-  const draw = (cards, hideLast = false) => {
+  const draw = (cards) => {
     const top = [];
     for (let i = cards.length - 1; i >= 0 && cards[i].r === cards.at(-1).r; i--) top.unshift(cards[i]);
     const spec = pileSpec('home', cards.length, top, cards.slice(0, cards.length - top.length).map((c) => c.b));
-    pileEl.classList.remove('is-clearing');
-    pileEl.innerHTML = pileHTML(spec, { hideLast });
+    pileEl.innerHTML = pileHTML(spec);
     return spec.at(-1);
   };
 
@@ -195,18 +196,9 @@ async function homeTable() {
       if ($('#home').hidden) return;
       const card = { id: `h${id++}`, r, s, b: id % 2 };
       cards.push(card);
-      draw(cards, true);
-      const el = pileEl.lastElementChild;
-      el.style.visibility = '';
-      const side = id % 2 ? 1 : -1;
-      el.animate(
-        [
-          { translate: `${side * 60}px 150%`, rotate: `${side * 50}deg`, scale: '1.25', opacity: 0 },
-          { opacity: 1, offset: 0.25 },
-          { translate: '0px 0px', rotate: '0deg', scale: '1', opacity: 1 },
-        ],
-        { duration: 380, easing: 'cubic-bezier(.2,.8,.25,1)' },
-      );
+      draw(cards);
+      // The newest card drops in from one side, and its shadow with it.
+      fx.dropOn(pileEl.lastElementChild, $$('.pile-cast .pile-shade', pileEl).at(-1), id % 2 ? 1 : -1);
     }
     await sleep(650);
     if ($('#home').hidden) return;
@@ -224,8 +216,7 @@ async function homeTable() {
       { duration: 1250, fill: 'both' },
     );
     wipe.animate([{ clipPath: 'polygon(0 0, 0 0, -25% 100%, -25% 100%)' }, { clipPath: 'polygon(0 0, 125% 0, 100% 100%, -25% 100%)' }], { duration: 520, easing: 'cubic-bezier(.3,.6,.2,1)', fill: 'both' });
-    pileEl.classList.add('is-clearing'); // the shadow goes with the cards
-    await fx.sweepOff($$('.pile-card', pileEl), 1);
+    await fx.sweepOff($$('.pile-card', pileEl), 1, $$('.pile-cast .pile-shade', pileEl));
     mat.style.setProperty('--mat', next);
     wipe.style.background = 'transparent';
     pileEl.innerHTML = '';
@@ -334,6 +325,9 @@ function followRename(code) {
   history.replaceState(null, '', api(`r/${encodeURIComponent(code)}`));
   if (push.isIOS() && !push.standalone()) carrySeat();
 }
+
+/** The pile's card shadows, in the same order as its cards. */
+const pileShades = () => $$('#pile .pile-cast > .pile-shade');
 
 const emptyPile = () => ({ count: 0, top: [], backs: [], ranks: {} });
 
@@ -626,8 +620,7 @@ async function showPlay(prev, next, ev) {
     sfx('pickup');
     if (actor === me.id) buzz([30, 40, 30]);
     fx.floatLabel(`+${ev.pickup}`, to, color);
-    $('#pile').classList.add('is-clearing'); // the shadow goes with the cards
-    await fx.gatherTo($$('#pile .pile-card'), to);
+    await fx.gatherTo($$('#pile .pile-card'), to, pileShades());
     ui.pile = emptyPile();
     renderPile(prev, ui.pile);
   }
@@ -644,11 +637,15 @@ async function showPlay(prev, next, ev) {
   };
   const spec = pileSpec(r0.id, after.count, after.top, after.backs);
   const anchor = fx.rectOf($('#pile'));
-  // Cards already on top shuffle along to make room for the newcomers.
-  for (const el of $$('#pile .pile-card.is-top')) {
-    const s = spec.find((x) => x.card?.id === el.dataset.cid);
-    if (s) el.style.cssText = pileStyle(s);
-  }
+  // Cards already on top shuffle along to make room for the newcomers, and their shadows with them.
+  const onPile = $$('#pile .pile-card');
+  const shades = pileShades();
+  onPile.forEach((el, k) => {
+    const s = el.classList.contains('is-top') ? spec.find((x) => x.card?.id === el.dataset.cid) : null;
+    if (!s) return;
+    el.style.cssText = pileStyle(s);
+    if (shades[k]) shades[k].style.cssText = pileShadeStyle(s);
+  });
 
   const ghosts = ev.cards.map((card, i) => {
     const src = sources[i];
@@ -659,7 +656,9 @@ async function showPlay(prev, next, ev) {
     const delay = i * 75;
     const duration = 330;
     setTimeout(() => sfx('card'), delay + duration - 50);
-    return fx.fly(g, src.rect, to, { delay, duration, lift: 22, flip: src.flip, rot0: (i - (ev.cards.length - 1) / 2) * 4 }).then(() => g);
+    // Its shadow ends up exactly where the pile will draw one for it, at the height it comes to rest.
+    const shadow = { rise1: s.z * anchor.w, land: pileShadow(anchor, s, spec) };
+    return fx.fly(g, src.rect, to, { delay, duration, lift: 22, flip: src.flip, rot0: (i - (ev.cards.length - 1) / 2) * 4, shadow }).then(() => g);
   });
   const landed = await Promise.all(ghosts);
   ui.pile = after;
@@ -674,8 +673,7 @@ async function showPlay(prev, next, ev) {
     const sub = ev.swipe === 'ten' ? 'A ten clears the pile' : 'Four of a kind';
     fx.callout('Swipe!', { color, on: onColor(color), sub });
     await sleep(reducedMotion() ? 0 : 150);
-    $('#pile').classList.add('is-clearing');
-    await fx.sweepOff($$('#pile .pile-card'), 1); // the same way the band is travelling
+    await fx.sweepOff($$('#pile .pile-card'), 1, pileShades()); // the same way the band is travelling
     $('#pile').classList.remove('is-hot');
     ui.pile = emptyPile();
     renderPile(prev, ui.pile);
@@ -731,7 +729,8 @@ async function showSkip(prev, ev) {
       : { ...fx.cardRectAt(target, cw * 0.4), rot: 0 };
     const g = fx.ghost(backHTML(b), from);
     setTimeout(() => sfx('deal'), i * 70 + 200);
-    return fx.fly(g, from, to, { delay: i * 70, duration: 420, rot0: (i % 2 ? -1 : 1) * 25, fade: !toHand, easing: 'cubic-bezier(.5,0,.6,1)' }).then(() => g);
+    // They come down from well above the table: the shadow starts far off and closes in.
+    return fx.fly(g, from, to, { delay: i * 70, duration: 420, rot0: (i % 2 ? -1 : 1) * 25, fade: !toHand, easing: 'cubic-bezier(.5,0,.6,1)', shadow: { rise0: cw * 2.4 } }).then(() => g);
   });
   setTimeout(() => fx.floatLabel(`+${drew}`, target, '#e3101e'), 320);
   const landed = await Promise.all(flights);

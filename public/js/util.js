@@ -94,6 +94,13 @@ export function seeded(seed) {
   };
 }
 
+/**
+ * Where a shadow falls on the table, for each unit of height its card is off
+ * it: the lamp is up and to the left. The pile at rest and every card in the
+ * air use the same one, so a shadow never jumps when a card lands.
+ */
+export const LIGHT = { x: 0.46, y: 0.8 };
+
 export const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export const reducedMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;

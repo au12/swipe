@@ -385,8 +385,7 @@ input:focus-visible, textarea:focus-visible, select:focus-visible { outline-offs
 }
 /* What the pile casts on the mat: one soft-edged shape per card, pushed away
    from the light and blurred in step with that card's height (view.js). */
-.pile-shades { position: absolute; inset: 0; pointer-events: none; transition: opacity 0.16s ease; }
-.pile.is-clearing .pile-shades { opacity: 0; }
+.pile-shades { position: absolute; inset: 0; pointer-events: none; }
 .pile-cast { position: absolute; inset: 0; } /* faded as one, so overlapping shadows don't add up */
 .pile-shade {
   --b: calc(var(--pw) * var(--blur, 0.02));
@@ -394,6 +393,7 @@ input:focus-visible, textarea:focus-visible, select:focus-visible { outline-offs
   background: rgba(0, 0, 0, var(--a, 1));
   box-shadow: 0 0 var(--b) calc(var(--b) * 0.5) rgba(0, 0, 0, var(--a, 1));
   transform: translate(calc(var(--x, 0) * var(--pw)), calc(var(--y, 0) * var(--pw))) rotate(var(--rot, 0deg));
+  transition: transform 0.28s cubic-bezier(0.2, 0.8, 0.25, 1); /* in step with its card when the top of the pile shuffles along */
 }
 /* The pool of shade round the foot of the pile reaches a little past the cards on every side. */
 .pile-shade.is-pool { inset: calc(var(--b) * 0.5 - var(--pw) * var(--grow, 0.06)); border-radius: calc(var(--pw) * 0.24); }
@@ -706,7 +706,10 @@ button.pl:hover { background: color-mix(in srgb, var(--ink) 7%, transparent); }
 .fx { position: fixed; inset: 0; z-index: 60; pointer-events: none; overflow: hidden; }
 .ghost { position: fixed; will-change: transform; }
 .ghost > .card { width: 100%; height: 100%; }
-.ghost > .card:not(.flipper), .ghost .flip-in > .card { box-shadow: 0 calc(var(--cw) * 0.03) 0 var(--card-edge), 0 14px 24px rgba(0, 0, 0, 0.38); }
+/* A card in the air keeps its edge, and casts its shadow on the table instead of carrying one about: see fx.js. */
+.ghost > .card:not(.flipper), .ghost .flip-in > .card { box-shadow: 0 calc(var(--cw) * 0.03) 0 var(--card-edge), 0 0 0 1px rgba(0, 0, 0, 0.16); }
+.ghost-shade { position: fixed; will-change: transform, opacity, filter; }
+.ghost-shade > b { position: absolute; inset: 0; border-radius: inherit; background: #000; }
 .wash { position: fixed; inset: 0; }
 .wash-dim { position: absolute; inset: 0; background: radial-gradient(ellipse at 50% 47%, rgba(8, 6, 4, 0.5), rgba(8, 6, 4, 0.74)); }
 .wash-cards { position: absolute; inset: 0; }

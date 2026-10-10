@@ -2,7 +2,7 @@
 // the page, flown from where a card was to where it is going, and removed
 // when the real card appears underneath. Nothing here knows the rules.
 
-import { $, reducedMotion, seeded, sleep } from './util.js';
+import { $, LIGHT, reducedMotion, seeded, sleep } from './util.js';
 import { backHTML } from './cards.js';
 import { play as sfx } from './sound.js';
 
@@ -32,12 +32,47 @@ export function ghost(html, rect) {
   return wrap;
 }
 
+// A card in the air has its shadow on the table, not on itself. The shadow is
+// a second ghost, drawn just beneath its card, that travels along the table
+// under it: the higher the card, the further the shadow falls
+// from it, the softer its edge and the fainter it is. As the card comes down
+// the two close up again, so a card lands on its own shadow.
+
+/** How a shadow looks for a card `h` pixels off the table. */
+const cast = (h) => ({ blur: 0.8 + h * 0.11, alpha: Math.max(0.2, 0.46 - h * 0.0018) });
+
+/** A shadow ghost over `rect`. It is removed with the card it belongs to. */
+function shadeUnder(el, rect) {
+  const shade = document.createElement('i');
+  shade.className = 'ghost-shade';
+  shade.style.cssText = `left:${rect.x}px;top:${rect.y}px;width:${rect.w}px;height:${rect.h}px;border-radius:${(rect.w * 0.07).toFixed(1)}px`;
+  shade.append(document.createElement('b')); // the dark itself; it narrows when the card turns over
+  el.before(shade);
+  const remove = el.remove.bind(el);
+  el.remove = () => {
+    shade.remove();
+    remove();
+  };
+  return shade;
+}
+
+const shadeFrame = (x, y, rot, scale, h, extra = {}) => {
+  const look = cast(h);
+  return { transform: `translate(${(x + LIGHT.x * h).toFixed(1)}px,${(y + LIGHT.y * h).toFixed(1)}px) rotate(${rot}deg) scale(${scale})`, filter: `blur(${look.blur.toFixed(1)}px)`, opacity: look.alpha, ...extra };
+};
+
 /**
  * Flies a ghost from `from` to `to` (both rects; `to.rot` is the resting
  * angle). `lift` arcs it toward the viewer on the way. With `flip`, a
  * two-sided ghost turns face up in mid-air.
+ *
+ * Its shadow goes with it unless `shadow` is false. `shadow.rise0` and
+ * `shadow.rise1` are how far off the table the card is when it sets off and
+ * when it arrives (pixels; 0 unless said), and `shadow.land`, if given, is
+ * exactly what the shadow must be at the end ({ x, y, w, h, rot, blur, alpha }:
+ * a pile card's own shadow, so the hand-over cannot be seen).
  */
-export function fly(el, from, to, { duration = 340, delay = 0, rot0 = 0, lift = 0, flip = false, fade = false, easing = EASE_OUT } = {}) {
+export function fly(el, from, to, { duration = 340, delay = 0, rot0 = 0, lift = 0, flip = false, fade = false, easing = EASE_OUT, shadow = true } = {}) {
   const dx = to.x + to.w / 2 - (from.x + from.w / 2);
   const dy = to.y + to.h / 2 - (from.y + from.h / 2);
   const s = to.w / from.w;
@@ -47,6 +82,23 @@ export function fly(el, from, to, { duration = 340, delay = 0, rot0 = 0, lift = 
   frames.push({ transform: `translate(${dx}px,${dy}px) rotate(${rot1}deg) scale(${s})`, opacity: fade ? 0 : 1 });
   const opts = { duration: duration * speed(), delay: delay * speed(), easing, fill: 'both' };
   if (flip) turnOver(el, opts);
+
+  if (shadow) {
+    const { rise0 = 0, rise1 = 0, land = null } = shadow === true ? {} : shadow;
+    const shade = shadeUnder(el, from);
+    if (flip) turnShade(shade, opts);
+    // The shadow keeps to the table: it takes the straight line while the card arcs up and away from it.
+    const path = [shadeFrame(0, 0, rot0, 1, rise0)];
+    if (lift) path.push(shadeFrame(dx * 0.5, dy * 0.5, (rot0 + rot1) / 2, (1 + s) / 2, Math.max(rise0, rise1) + lift * 1.7, { offset: 0.5 }));
+    if (land) {
+      const lx = land.x + land.w / 2 - (from.x + from.w / 2);
+      const ly = land.y + land.h / 2 - (from.y + from.h / 2);
+      path.push({ transform: `translate(${lx.toFixed(1)}px,${ly.toFixed(1)}px) rotate(${land.rot}deg) scale(${land.w / from.w})`, filter: `blur(${land.blur.toFixed(1)}px)`, opacity: fade ? 0 : land.alpha });
+    } else {
+      path.push(shadeFrame(dx, dy, rot1, s, rise1, fade ? { opacity: 0 } : {}));
+    }
+    shade.animate(path, opts);
+  }
   return el.animate(frames, opts).finished.catch(() => {});
 }
 
@@ -72,10 +124,27 @@ function turnOver(el, timing) {
   done.finished.then(() => inner.parentElement.classList.add('is-up')).catch(() => {});
 }
 
+/**
+ * The shadow of a card that is turning over. Seen from above, a card on its
+ * way round gets narrower until it is edge-on and then widens again, and so
+ * does what it blocks of the light. Keeps time with turnOver.
+ */
+function turnShade(shade, timing) {
+  const { duration, delay = 0 } = timing;
+  const STEPS = 8;
+  const frames = Array.from({ length: STEPS + 1 }, (_, i) => ({ transform: `scaleX(${Math.max(0.05, Math.abs(Math.cos((Math.PI * i) / STEPS))).toFixed(3)})` }));
+  shade.firstElementChild?.animate(frames, { duration, delay, fill: 'both', easing: 'cubic-bezier(.42,0,.58,1)' });
+}
+
 /** Turns a two-sided ghost over where it lies, lifting it a little as it goes. */
 export function flipInPlace(el, { duration = 460 } = {}) {
   const opts = { duration: duration * speed(), easing: 'ease-in-out', fill: 'both' };
   turnOver(el, opts);
+  // Up off the table and down again, its shadow sliding out from under it and back, thinning to a line as the card stands on edge.
+  const rect = rectOf(el);
+  const shade = shadeUnder(el, rect);
+  turnShade(shade, opts);
+  shade.animate([shadeFrame(0, 0, 0, 1, 0), shadeFrame(0, 0, 0, 1.1, rect.w * 0.3, { offset: 0.5 }), shadeFrame(0, 0, 0, 1, 0)], opts);
   return el
     .animate([{ transform: 'scale(1)' }, { transform: 'scale(1.22) translateY(-8%)', offset: 0.5 }, { transform: 'scale(1)' }], opts)
     .finished.catch(() => {});
@@ -85,20 +154,41 @@ export function flipInPlace(el, { duration = 460 } = {}) {
 // and `scale` properties, which stack on top of the transform that scatters
 // them, so nothing has to be recomputed.
 
+// Each pile card has a shadow of its own on the mat (`shades`, in the same
+// order as `cards`). When the cards leave, their shadows leave with them.
+
+/** The pool of shade round the foot of the pile drains away as the pile goes. */
+function drainPool(shades, ms) {
+  const pool = shades.find(Boolean)?.closest('.pile-shades')?.querySelector('.is-pool');
+  pool?.animate([{ opacity: 1 }, { opacity: 0 }], { duration: ms * speed(), easing: 'ease-out', fill: 'both' });
+}
+
 /** The swipe: every card in the pile is swept off one side of the screen. */
-export function sweepOff(cards, dir = 1) {
+export function sweepOff(cards, dir = 1, shades = []) {
   const far = window.innerWidth * 0.75 + 200;
-  const list = cards.slice().reverse(); // top card leaves first
+  const list = cards.map((el, k) => [el, shades[k]]).reverse(); // top card leaves first
+  drainPool(shades, 380);
   return Promise.all(
-    list.map((el, i) => {
+    list.map(([el, shade], i) => {
       const rnd = seeded(`sweep${i}${cards.length}`);
+      const y = (rnd() - 0.6) * 160;
+      const spin = dir * (160 + rnd() * 380);
+      const opts = { duration: (430 + rnd() * 160) * speed(), delay: Math.min(i * 16, 220) * speed(), easing: EASE_IN, fill: 'both' };
+      // Swept up as well as along: the shadow trails further from its card the faster it goes, and thins.
+      shade?.animate(
+        [
+          { translate: '0px 0px', rotate: '0deg', opacity: 1 },
+          { translate: `${dir * far + LIGHT.x * 150}px ${y + LIGHT.y * 150}px`, rotate: `${spin}deg`, opacity: 0.3 },
+        ],
+        opts,
+      );
       return el
         .animate(
           [
             { translate: '0px 0px', rotate: '0deg' },
-            { translate: `${dir * far}px ${(rnd() - 0.6) * 160}px`, rotate: `${dir * (160 + rnd() * 380)}deg` },
+            { translate: `${dir * far}px ${y}px`, rotate: `${spin}deg` },
           ],
-          { duration: (430 + rnd() * 160) * speed(), delay: Math.min(i * 16, 220) * speed(), easing: EASE_IN, fill: 'both' },
+          opts,
         )
         .finished.catch(() => {});
     }),
@@ -106,13 +196,25 @@ export function sweepOff(cards, dir = 1) {
 }
 
 /** Picking up: the pile's cards are gathered into `to` (a hand, or a seat chip). */
-export function gatherTo(cards, to) {
-  const list = cards.slice().reverse();
+export function gatherTo(cards, to, shades = []) {
+  const list = cards.map((el, k) => [el, shades[k]]).reverse();
+  drainPool(shades, 340);
   return Promise.all(
-    list.map((el, i) => {
+    list.map(([el, shade], i) => {
       const from = rectOf(el);
       const dx = to.x + to.w / 2 - (from.x + from.w / 2);
       const dy = to.y + to.h / 2 - (from.y + from.h / 2);
+      const opts = { duration: 420 * speed(), delay: Math.min(i * 22, 260) * speed(), easing: 'cubic-bezier(.5,0,.3,1)', fill: 'both' };
+      // Lifted off the mat and carried: the shadow runs along underneath, a little behind, and goes as the card is taken in.
+      shade?.animate(
+        [
+          { translate: '0px 0px', scale: '1', opacity: 1 },
+          { translate: `${dx * 0.5 + LIGHT.x * 46}px ${dy * 0.5 + LIGHT.y * 46}px`, scale: '0.8', opacity: 0.75, offset: 0.5 },
+          { translate: `${dx * 0.9 + LIGHT.x * 14}px ${dy * 0.9 + LIGHT.y * 14}px`, scale: '0.6', opacity: 0.5, offset: 0.85 },
+          { translate: `${dx}px ${dy}px`, scale: '0.45', opacity: 0 },
+        ],
+        opts,
+      );
       return el
         .animate(
           [
@@ -120,11 +222,40 @@ export function gatherTo(cards, to) {
             { translate: `${dx * 0.9}px ${dy * 0.9}px`, scale: '0.6', opacity: 1, offset: 0.85 },
             { translate: `${dx}px ${dy}px`, scale: '0.45', opacity: 0 },
           ],
-          { duration: 420 * speed(), delay: Math.min(i * 22, 260) * speed(), easing: 'cubic-bezier(.5,0,.3,1)', fill: 'both' },
+          opts,
         )
         .finished.catch(() => {});
     }),
   );
+}
+
+/**
+ * A card dropped onto the pile from the side, as on the home page: it comes
+ * in high and turning, and its shadow comes in from further off, wide and
+ * faint, and tightens under it as it lands.
+ */
+export function dropOn(card, shade, side = 1) {
+  const opts = { duration: 380 * speed(), easing: EASE_OUT };
+  const h = card.offsetWidth * 0.9; // how high it starts
+  const fall = card.offsetHeight * 1.5;
+  shade?.animate(
+    [
+      { translate: `${side * 60 + LIGHT.x * h}px ${fall + LIGHT.y * h}px`, rotate: `${side * 50}deg`, scale: '1.2', opacity: 0, filter: `blur(${(h * 0.16).toFixed(1)}px)` },
+      { opacity: 0.55, offset: 0.25 },
+      { translate: '0px 0px', rotate: '0deg', scale: '1', opacity: 1, filter: 'blur(0px)' },
+    ],
+    opts,
+  );
+  return card
+    .animate(
+      [
+        { translate: `${side * 60}px ${fall}px`, rotate: `${side * 50}deg`, scale: '1.25', opacity: 0 },
+        { opacity: 1, offset: 0.25 },
+        { translate: '0px 0px', rotate: '0deg', scale: '1', opacity: 1 },
+      ],
+      opts,
+    )
+    .finished.catch(() => {});
 }
 
 /** A short label that floats up from a spot and fades: "+14". */
