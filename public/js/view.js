@@ -745,6 +745,7 @@ export function renderResults(state, me) {
           : `<p class="lobby-wait">Waiting for ${esc(hostName(state))} to ${matchOver ? 'start a new match' : 'deal the next game'}.</p>`
       }
       ${!inRound(state, me.id) && !me.playing ? '<button type="button" class="btn btn-large btn-mat" data-act="sit">Deal me in</button>' : ''}
+      <button type="button" class="btn btn-large btn-mat" data-act="stats">${icon('chart')}All-time stats</button>
     </div>`;
 }
 
@@ -794,7 +795,10 @@ function scorePanel(state, me) {
       <div class="side-row"><h2>Scores</h2><span class="side-meta">${m ? `Game ${m.gameNo}, to ${limit}` : `To ${limit}`}</span></div>
       <ol class="pls">${rows || '<li class="side-meta">Nobody is seated yet.</li>'}</ol>
       ${watchers.length ? `<div class="watchers"><span class="side-meta">Watching</span>${watchList}</div>` : ''}
-      ${seatBtn}
+      <div class="side-buttons">
+        <button type="button" class="btn btn-small" data-act="stats">${icon('chart')}All-time stats</button>
+        ${seatBtn}
+      </div>
     </section>`;
 }
 

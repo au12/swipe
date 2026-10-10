@@ -196,12 +196,22 @@ export function createAdmin({ rooms, sockets, clientIp, isHttps, send, readJson,
     const r = room.round;
     const m = room.match;
     const people = [...room.players.values()].sort((a, b) => a.joinedAt - b.joinedAt);
+    const stats = room.stats ?? {};
+    const record = (key) => ({ games: stats[key]?.games ?? 0, wins: stats[key]?.wins ?? 0, points: stats[key]?.points ?? 0 });
+    const seatedKeys = new Set(people.map((p) => rooms.statKeyOf(room, p)));
+    // People with a record here who are not in the room any more: they left long ago, or came back as somebody new.
+    const absent = Object.entries(stats)
+      .filter(([key]) => !seatedKeys.has(key))
+      .map(([key, s]) => ({ key, name: s.name, color: s.color, bot: Boolean(s.bot), ...record(key) }))
+      .sort((a, b) => a.name.localeCompare(b.name));
     const players = people.map((p) => {
       const open = [...p.sockets].filter((s) => s.readyState === 1);
       const ips = [...new Set(open.map((s) => s.ip).filter(Boolean))];
       const seat = r && r.phase !== 'over' ? r.seats[p.id] : null;
       return {
         id: p.id,
+        key: rooms.statKeyOf(room, p),
+        ...record(rooms.statKeyOf(room, p)),
         name: p.name,
         color: p.color,
         bot: p.bot,
@@ -243,6 +253,8 @@ export function createAdmin({ rooms, sockets, clientIp, isHttps, send, readJson,
       settings: room.settings,
       banned: room.banned.length,
       players,
+      absent,
+      statsKept: Object.values(stats).filter((s) => s.games > 0).length,
     };
   }
 
@@ -421,6 +433,22 @@ export function createAdmin({ rooms, sockets, clientIp, isHttps, send, readJson,
         room.banned = [];
         rooms.scheduleSave();
         return done({ code, n }, { n });
+      }
+      case 'room.statsReset': {
+        const key = body.key == null ? null : text(body.key);
+        if (body.key != null && !key) return fail('Choose whose stats to reset.');
+        const who = key ? (room.stats?.[rooms.resolveStatKey(room, key)]?.name ?? null) : null;
+        const n = rooms.resetStats(room, key);
+        if (key && !n) return fail('That player has no stats to reset.');
+        return done({ code, name: who, n }, { n });
+      }
+      case 'room.consolidate': {
+        const res = rooms.consolidate(room, body.keys, body.keep, body.name);
+        return res.error ? fail(res.error) : done({ code, name: res.name, merged: res.merged, removed: res.removed.length }, { name: res.name, removed: res.removed });
+      }
+      case 'room.renamePlayer': {
+        const res = rooms.renamePerson(room, { id: body.id ? text(body.id) : null, key: body.key ? text(body.key) : null }, body.name);
+        return res.error ? fail(res.error) : done({ code, name: res.name, was: res.was }, { name: res.name });
       }
       case 'room.host': {
         const p = player();

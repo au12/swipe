@@ -9,6 +9,7 @@ import { TEN, judge } from './rules.js';
 import * as fx from './fx.js';
 import * as push from './push.js';
 import * as chat from './chat.js';
+import * as stats from './stats.js';
 import {
   colorOf,
   fitHand,
@@ -359,6 +360,7 @@ function roomMissing() {
 function connect(code, name, claim = null) {
   conn?.close();
   chat.reset();
+  stats.reset();
   conn = new Connection({
     room: code,
     token: token(),
@@ -380,6 +382,7 @@ function connect(code, name, claim = null) {
     onStatus: (up) => ($('#conn-banner').hidden = up),
     // A message from whoever runs the server: long enough on screen to read twice.
     onChat: (msg) => chat.receive(msg),
+    onStats: (msg) => stats.receive(msg),
     onNote: (message) => {
       sfx('join');
       toast(String(message), { hold: Math.min(15000, 6000 + String(message).length * 45) });
@@ -1090,6 +1093,8 @@ function bindGlobal() {
     switch (el.dataset.act) {
       case 'peek':
         return togglePeek();
+      case 'stats':
+        return stats.open(state?.code ?? currentRoomCode());
       case 'rules':
         return $('#dlg-rules').showModal();
       case 'sound':

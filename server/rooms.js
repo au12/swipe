@@ -68,6 +68,13 @@ const defaultSettings = () => ({
   turnSeconds: 0, // 0 = no clock
 });
 
+/**
+ * The key a browser's stats are kept under: made from its seat token, so the
+ * same browser is the same person however long it has been away, and the
+ * token itself is never stored beside the stats.
+ */
+export const statKey = (token) => `h${createHash('sha256').update(String(token)).digest('hex').slice(0, 16)}`;
+
 /** How many cards of each rank: { K: 2, 7: 1 }. */
 const tally = (cards) => {
   const counts = {};
@@ -109,6 +116,8 @@ export class Rooms {
       players: new Map(),
       banned: [],
       chat: [], // the last hundred things people said: { id, by, name, color, text, at }
+      stats: {}, // all-time, by person: { [key]: { name, color, bot, games, wins, points } }
+      statAlias: {}, // a key that was merged into another -> the one it now counts for
       match: null, // a run of games played to the points limit
       round: null, // the game on the table right now
     };
@@ -318,7 +327,7 @@ export class Rooms {
         seenAt: now(),
       };
       room.players.set(player.id, player);
-    } else if (!claimed && name && cleanName(name) && cleanName(name) !== player.name) {
+    } else if (!claimed && !player.renamed && name && cleanName(name) && cleanName(name) !== player.name) {
       player.name = this.freeName(room, cleanName(name), player.id);
     }
     if (origin) player.origin = origin;
@@ -330,6 +339,7 @@ export class Rooms {
     // What has been said so far, to this browser only. New messages follow one at a time.
     try {
       socket.send(JSON.stringify({ t: 'chat', all: room.chat ?? [] }));
+      socket.send(JSON.stringify({ t: 'stats', rows: this.statRows(room) }));
     } catch {}
     socket.visible = true;
     player.sockets.add(socket);
@@ -397,7 +407,10 @@ export class Rooms {
       } catch {}
     }
     owner.sockets = new Set();
+    // The seat's record follows it: games from this browser count for the same person as before.
+    const key = this.statKeyOf(room, owner);
     owner.token = token;
+    if (statKey(token) !== key) (room.statAlias ??= {})[statKey(token)] = key;
     owner.push = null; // notifications were that browser's; this one asks for its own
     return owner;
   }
@@ -477,6 +490,195 @@ export class Rooms {
     const top = game.topOf(r.pile).rank;
     const next = !top ? 'Play anything.' : top === 'A' ? 'Aces only, or a ten.' : `${top} or lower, or a ten.`;
     return `${what} ${next}`.trim();
+  }
+
+  // ───────────────────────── all-time stats ─────────────────────────
+  // Kept per room, by person rather than by seat: a player who has been away
+  // long enough to be forgotten by the room still has their record when they
+  // come back, as long as it is the same browser. When it is not (cleared
+  // storage, a new phone), the admin can fold two records into one.
+
+  /** The key this player's games are counted under. */
+  statKeyOf(room, p) {
+    p.sid ??= p.bot ? `b:${p.name.toLowerCase()}` : statKey(p.token);
+    return this.resolveStatKey(room, p.sid);
+  }
+
+  /** Follows a key through any merges to the one it counts for now. */
+  resolveStatKey(room, key) {
+    const alias = room.statAlias ?? {};
+    let at = key;
+    for (let i = 0; i < 20 && alias[at]; i++) at = alias[at];
+    return at;
+  }
+
+  /** A game somebody went out of: one more game for everyone who finished it, a win for whoever went out. */
+  recordGame(room, r) {
+    room.stats ??= {};
+    for (const pid of r.order) {
+      const p = room.players.get(pid);
+      if (!p) continue;
+      const key = this.statKeyOf(room, p);
+      const s = (room.stats[key] ??= { name: p.name, color: p.color, bot: p.bot, games: 0, wins: 0, points: 0 });
+      s.name = p.name;
+      s.color = p.color;
+      s.games += 1;
+      if (pid === r.winner) s.wins += 1;
+      s.points += r.result.points[pid] ?? 0;
+    }
+    this.broadcastStats(room);
+  }
+
+  /** The board as everyone sees it: one row for each person who has finished a game here. */
+  statRows(room) {
+    const here = new Map();
+    for (const p of room.players.values()) here.set(this.statKeyOf(room, p), p);
+    return Object.entries(room.stats ?? {})
+      .filter(([, s]) => s.games > 0)
+      .map(([key, s]) => {
+        const p = here.get(key);
+        return { id: key, name: p?.name ?? s.name, color: p?.color ?? s.color, bot: Boolean(s.bot), here: Boolean(p), games: s.games, wins: s.wins, points: s.points };
+      });
+  }
+
+  broadcastStats(room) {
+    const payload = JSON.stringify({ t: 'stats', rows: this.statRows(room) });
+    for (const p of room.players.values()) {
+      for (const socket of p.sockets) {
+        if (socket.readyState === 1) socket.send(payload);
+      }
+    }
+    this.scheduleSave();
+  }
+
+  /** Wipes one person's record, or with no key everybody's. Returns how many records went. */
+  resetStats(room, key = null) {
+    room.stats ??= {};
+    let n = 0;
+    if (key == null) {
+      n = Object.keys(room.stats).length;
+      room.stats = {};
+    } else {
+      const at = this.resolveStatKey(room, key);
+      if (room.stats[at]) n = 1;
+      delete room.stats[at];
+    }
+    this.broadcastStats(room);
+    return n;
+  }
+
+  /**
+   * Folds several people's records into one, for when the same person has
+   * ended up in the room more than once. Their games, wins and points are
+   * added together under `keep`, and from now on games played from any of
+   * those browsers count there.
+   *
+   * If more than one of them is in the room at the moment, one seat survives:
+   * the kept person's if they have one. It is handed to whichever of them is
+   * actually connected, and the other seats leave the room (and any game on
+   * the table) the way a player who walked out would. Returns { key, name,
+   * merged, removed } or { error }.
+   */
+  consolidate(room, keys, keep, name = '') {
+    room.stats ??= {};
+    room.statAlias ??= {};
+    const all = [...new Set((Array.isArray(keys) ? keys : []).map((k) => this.resolveStatKey(room, text(k))).filter(Boolean))];
+    const kept = this.resolveStatKey(room, text(keep));
+    if (all.length < 2) return { error: 'Tick at least two players to make into one.' };
+    if (!all.includes(kept)) return { error: 'Choose which of them to keep.' };
+    const seatsOf = (key) => [...room.players.values()].filter((p) => this.statKeyOf(room, p) === key);
+    const known = (key) => Boolean(room.stats[key]) || seatsOf(key).length > 0;
+    if (!all.every(known)) return { error: 'One of those players is no longer here. Look again and try once more.' };
+    if (all.some((key) => key.startsWith('b:'))) return { error: 'Computer players can’t be made into one with anybody.' };
+
+    const seats = all.flatMap(seatsOf);
+    const survivor = seatsOf(kept)[0] ?? seats.slice().sort((a, b) => Number(b.online) - Number(a.online) || b.seenAt - a.seenAt)[0] ?? null;
+    const wanted = cleanName(name);
+    const others = [...room.players.values()].filter((p) => !seats.includes(p));
+    const finalName = wanted || survivor?.name || room.stats[kept]?.name || '';
+    if (wanted && others.some((p) => p.name.toLowerCase() === wanted.toLowerCase())) return { error: 'Someone else in this room already has that name.' };
+
+    // The records.
+    const sum = { name: finalName, color: survivor?.color ?? room.stats[kept]?.color ?? COLORS[0], bot: false, games: 0, wins: 0, points: 0 };
+    for (const key of all) {
+      const s = room.stats[key];
+      if (s) {
+        sum.games += s.games;
+        sum.wins += s.wins;
+        sum.points += s.points;
+      }
+      delete room.stats[key];
+      if (key !== kept) room.statAlias[key] = kept;
+    }
+    if (sum.games > 0) room.stats[kept] = sum;
+
+    // The seats.
+    const removed = [];
+    if (survivor) {
+      const live = seats.filter((p) => p !== survivor && p.online).sort((a, b) => b.seenAt - a.seenAt)[0];
+      // The person is at a browser the surviving seat does not know: hand the seat to it.
+      const handOver = !survivor.online && live ? live.token : null;
+      for (const p of seats) {
+        if (p === survivor) continue;
+        this.unseat(room, p);
+        room.players.delete(p.id);
+        if (room.hostId === p.id) room.hostId = survivor.id;
+        removed.push(p.name);
+        for (const socket of p.sockets) {
+          try {
+            if (handOver && p.token === handOver) socket.close(4002, 'seat changed'); // it reconnects, and is the survivor
+            else {
+              socket.send(JSON.stringify({ t: 'moved' }));
+              socket.close(4003, 'seat moved');
+            }
+          } catch {}
+        }
+        p.sockets = new Set();
+      }
+      if (handOver) {
+        survivor.token = handOver;
+        survivor.push = null;
+        survivor.seats = [];
+      }
+      survivor.sid = kept;
+      survivor.name = finalName;
+      // The admin has said who this is: a browser arriving with another name saved does not change it back.
+      survivor.renamed = true;
+    }
+    this.afterChange(room);
+    this.broadcast(room);
+    this.broadcastStats(room);
+    return { key: kept, name: finalName, merged: all.length, removed };
+  }
+
+  /**
+   * The admin gives someone a name: a player in the room (by player id), or a
+   * record of someone who is not (by stats key). The player's browser does not
+   * get to change it back just by reconnecting. Returns { name } or { error }.
+   */
+  renamePerson(room, { id = null, key = null }, raw) {
+    const name = cleanName(raw);
+    if (!name) return { error: 'A name needs at least one character.' };
+    const p = id ? room.players.get(text(id)) : null;
+    if (id && !p) return { error: 'That player has already left.' };
+    if ([...room.players.values()].some((x) => x !== p && x.name.toLowerCase() === name.toLowerCase())) return { error: 'Someone else in this room already has that name.' };
+    let was;
+    if (p) {
+      was = p.name;
+      p.name = name;
+      p.renamed = true;
+      const s = (room.stats ?? {})[this.statKeyOf(room, p)];
+      if (s) s.name = name;
+    } else {
+      const s = (room.stats ?? {})[this.resolveStatKey(room, text(key))];
+      if (!s) return { error: 'That player’s record is no longer here.' };
+      was = s.name;
+      s.name = name;
+    }
+    this.scheduleSave();
+    this.broadcast(room);
+    this.broadcastStats(room);
+    return { name, was };
   }
 
   // ───────────────────────── chat ─────────────────────────
@@ -802,6 +1004,7 @@ export class Rooms {
         m.lastWinner = r.winner;
         m.history.push({ no: r.no, winner: r.winner, points: r.result.points });
         if (m.history.length > 200) m.history.shift();
+        this.recordGame(room, r);
         this.checkMatch(room);
       }
     }
@@ -935,12 +1138,15 @@ export class Rooms {
         const name = cleanName(msg.name);
         if (!name) return 'Names need at least one character.';
         me.name = this.freeName(room, name, me.id);
+        me.renamed = false; // their own choice again, whatever the admin had set
+        this.broadcastStats(room);
         break;
       }
       case 'recolor': {
         // Something different from what they have now, and from everyone else.
         const old = me.color;
         for (let i = 0; i < 8 && me.color === old; i++) me.color = this.freeColor(room, me.id);
+        this.broadcastStats(room);
         break;
       }
       // Notifications are between one player and the server: nobody else hears about them.
@@ -1125,6 +1331,8 @@ export class Rooms {
         expiry: saved.expiry ?? null,
         aliases: (saved.aliases ?? []).filter((a) => typeof a === 'string' && a !== saved.code),
         chat: Array.isArray(saved.chat) ? saved.chat.slice(-CHAT_KEEP) : [],
+        stats: saved.stats && typeof saved.stats === 'object' ? saved.stats : {},
+        statAlias: saved.statAlias && typeof saved.statAlias === 'object' ? saved.statAlias : {},
         settings: { ...defaultSettings(), ...saved.settings },
         players: new Map(saved.players.map((p) => [p.id, { ...p, online: Boolean(p.bot), sockets: new Set() }])),
       };

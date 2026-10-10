@@ -6,6 +6,9 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import fs from 'node:fs';
+import os from 'node:os';
+import { createHash } from 'node:crypto';
 import WebSocket from 'ws';
 import { deviceLabel } from '../server/admin.js';
 
@@ -32,7 +35,32 @@ async function boot(port, env) {
   throw new Error('server did not start');
 }
 
-before(() => Promise.all([boot(PORT, { ADMIN_PASSWORD: PASSWORD, TRUST_PROXY: '1' }), boot(PORT + 1, {})]));
+// A third server starts from a saved room that already has a history: stats, and the same person in it twice.
+const STATS = `http://127.0.0.1:${PORT + 2}`;
+const statsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'swipe-admin-stats-'));
+const key = (token) => `h${createHash('sha256').update(token).digest('hex').slice(0, 16)}`;
+const SEATS = { ana: 'saved-token-for-ana-000001', bo: 'saved-token-for-bo-0000002', bo2: 'saved-token-for-bo-again-03' };
+function savedRoom() {
+  const person = (id, name, token, color, joinedAt) => ({ id, token, name, color, bot: false, playing: true, online: false, joinedAt, seenAt: Date.now() - 60_000 });
+  return {
+    code: 'stats-room-01', aliases: [], createdAt: Date.now() - 86400_000, lastActive: Date.now(), expiry: 'never', hostId: 'pAna', locked: false,
+    settings: { limit: 100, turnSeconds: 0 }, banned: [], chat: [], match: null, round: null,
+    players: [person('pAna', 'Ana', SEATS.ana, '#e5484d', 1), person('pBo', 'Bo', SEATS.bo, '#3b9eff', 2), person('pBo2', 'Bo 2', SEATS.bo2, '#ffb224', 3)],
+    stats: {
+      [key(SEATS.ana)]: { name: 'Ana', color: '#e5484d', bot: false, games: 10, wins: 4, points: 120 },
+      [key(SEATS.bo)]: { name: 'Bo', color: '#3b9eff', bot: false, games: 6, wins: 3, points: 60 },
+      [key(SEATS.bo2)]: { name: 'Bo 2', color: '#ffb224', bot: false, games: 4, wins: 1, points: 90 },
+      hGONE1: { name: 'Dee', color: '#12a594', bot: false, games: 3, wins: 0, points: 75 },
+      hGONE2: { name: 'Dee 2', color: '#9a4fd0', bot: false, games: 2, wins: 2, points: 0 },
+      'b:riffle': { name: 'Riffle', color: '#46a758', bot: true, games: 5, wins: 1, points: 80 },
+    },
+    statAlias: {},
+  };
+}
+fs.writeFileSync(path.join(statsDir, 'rooms.json'), JSON.stringify({ version: 1, savedAt: Date.now(), rooms: [savedRoom()] }));
+
+before(() => Promise.all([boot(PORT, { ADMIN_PASSWORD: PASSWORD, TRUST_PROXY: '1' }), boot(PORT + 1, {}), boot(PORT + 2, { ADMIN_PASSWORD: PASSWORD, PERSIST: 'true', DATA_DIR: statsDir })]));
+after(() => fs.rmSync(statsDir, { recursive: true, force: true }));
 after(() => servers.forEach((s) => s.kill()));
 
 const tick = (ms = 40) => new Promise((r) => setTimeout(r, ms));
@@ -608,3 +636,120 @@ test('only a plain /admin path is the admin page, so a proxy rule on /admin cann
     ws.on('open', () => assert.fail('opened'));
   });
 });
+
+// ───────────────────────── all-time stats ─────────────────────────
+
+let statsSession = null;
+async function onStats(body) {
+  statsSession ??= (await post(`${STATS}/admin/api/login`, { password: PASSWORD })).headers.get('set-cookie').split(';')[0];
+  if (!body) return (await (await fetch(`${STATS}/admin/api/state`, { headers: { cookie: statsSession } })).json()).rooms.find((r) => r.code === 'stats-room-01');
+  const res = await post(`${STATS}/admin/api/act`, { code: 'stats-room-01', ...body }, { cookie: statsSession });
+  return { status: res.status, ...(await res.json()) };
+}
+const record = (x) => x && { games: x.games, wins: x.wins, points: x.points };
+/** What a player in the room is sent: the board, then the picture of the room. */
+function watch(token, name) {
+  const ws = new WebSocket(`ws://127.0.0.1:${PORT + 2}/ws`);
+  const c = { ws, board: null, state: null, closed: null, moved: false, waiters: [] };
+  ws.on('open', () => ws.send(JSON.stringify({ t: 'hello', room: 'stats-room-01', token, name })));
+  ws.on('message', (raw) => {
+    const msg = JSON.parse(raw);
+    if (msg.t === 'stats') c.board = msg.rows;
+    if (msg.t === 'state') c.state = msg.s;
+    if (msg.t === 'moved') c.moved = true;
+    c.waiters = c.waiters.filter((w) => (w.pred(c) ? (w.resolve(), false) : true));
+  });
+  ws.on('close', (code) => {
+    c.closed = code;
+    c.waiters = c.waiters.filter((w) => (w.pred(c) ? (w.resolve(), false) : true));
+  });
+  c.until = (pred, what) =>
+    new Promise((resolve, reject) => {
+      if (pred(c)) return resolve();
+      const timer = setTimeout(() => reject(new Error(`timed out waiting for ${what}`)), 4000);
+      c.waiters.push({ pred, resolve: () => (clearTimeout(timer), resolve()) });
+    });
+  return c;
+}
+
+test('the admin page is shown each player’s record, and the records of people no longer in the room', async () => {
+  const room = await onStats();
+  assert.deepEqual(room.players.map((p) => [p.name, record(p)]), [['Ana', { games: 10, wins: 4, points: 120 }], ['Bo', { games: 6, wins: 3, points: 60 }], ['Bo 2', { games: 4, wins: 1, points: 90 }]]);
+  assert.deepEqual(room.players.map((p) => p.key), [key(SEATS.ana), key(SEATS.bo), key(SEATS.bo2)]);
+  assert.deepEqual(room.absent.map((x) => [x.name, x.key, x.bot, record(x)]), [['Dee', 'hGONE1', false, { games: 3, wins: 0, points: 75 }], ['Dee 2', 'hGONE2', false, { games: 2, wins: 2, points: 0 }], ['Riffle', 'b:riffle', true, { games: 5, wins: 1, points: 80 }]]);
+  assert.equal(room.statsKept, 6);
+  const text = JSON.stringify(room);
+  for (const token of Object.values(SEATS)) assert.ok(!text.includes(token), 'the keys do not give the seat tokens away');
+});
+
+test('a player in the room is sent the board when they arrive and again whenever the admin changes it', async () => {
+  const ana = watch(SEATS.ana, 'Ana');
+  await ana.until((c) => c.board && c.state, 'the board');
+  assert.equal(ana.board.length, 6);
+  assert.deepEqual(record(ana.board.find((x) => x.name === 'Dee')), { games: 3, wins: 0, points: 75 });
+
+  // One player's stats.
+  assert.match((await onStats({ do: 'room.statsReset', key: 'hNOBODY' })).error, /no stats to reset/);
+  assert.match((await onStats({ do: 'room.statsReset', key: '' })).error, /whose stats/);
+  assert.deepEqual(await onStats({ do: 'room.statsReset', key: 'b:riffle' }), { status: 200, ok: true, n: 1 });
+  await ana.until((c) => c.board.length === 5, 'the board without Riffle');
+  assert.equal((await onStats()).absent.some((x) => x.name === 'Riffle'), false);
+  ana.ws.close();
+});
+
+test('renaming from the admin page: a player in the room, and a record of someone who is not', async () => {
+  const ana = watch(SEATS.ana, 'Ana');
+  await ana.until((c) => c.state, 'the room');
+  assert.deepEqual(await onStats({ do: 'room.renamePlayer', id: 'pBo2', name: ' Roberto ' }), { status: 200, ok: true, name: 'Roberto' });
+  await ana.until((c) => c.state.players.some((p) => p.name === 'Roberto') && c.board.some((x) => x.name === 'Roberto'), 'the new name, in the room and on the board');
+  assert.deepEqual(await onStats({ do: 'room.renamePlayer', key: 'hGONE2', name: 'Deirdre' }), { status: 200, ok: true, name: 'Deirdre' });
+  assert.ok((await onStats()).absent.some((x) => x.name === 'Deirdre' && x.key === 'hGONE2'));
+
+  assert.match((await onStats({ do: 'room.renamePlayer', id: 'pBo2', name: 'ana' })).error, /already has that name/);
+  assert.match((await onStats({ do: 'room.renamePlayer', id: 'pBo2', name: '  ' })).error, /at least one character/);
+  assert.match((await onStats({ do: 'room.renamePlayer', id: 'pNobody', name: 'X' })).error, /already left/);
+  assert.match((await onStats({ do: 'room.renamePlayer', key: 'hNOBODY', name: 'X' })).error, /no longer here/);
+  assert.match((await onStats({ do: 'room.renamePlayer', name: 'X' })).error, /no longer here/);
+  // Back to what it was, for the tests that follow.
+  await onStats({ do: 'room.renamePlayer', id: 'pBo2', name: 'Bo 2' });
+  ana.ws.close();
+});
+
+test('consolidating from the admin page: two records of people who left, then the same person twice in the room', async () => {
+  // Dee and her second record: nobody in the room is touched.
+  assert.match((await onStats({ do: 'room.consolidate', keys: ['hGONE1'], keep: 'hGONE1' })).error, /at least two/);
+  assert.match((await onStats({ do: 'room.consolidate', keys: ['hGONE1', 'hGONE2'], keep: key(SEATS.ana) })).error, /which of them to keep/);
+  assert.match((await onStats({ do: 'room.consolidate', keys: 'hGONE1', keep: 'hGONE1' })).error, /at least two/);
+  assert.deepEqual(await onStats({ do: 'room.consolidate', keys: ['hGONE1', 'hGONE2'], keep: 'hGONE1', name: 'Dee' }), { status: 200, ok: true, name: 'Dee', removed: [] });
+  let room = await onStats();
+  assert.deepEqual(room.absent.filter((x) => !x.bot).map((x) => [x.name, x.key, record(x)]), [['Dee', 'hGONE1', { games: 5, wins: 2, points: 75 }]]);
+  assert.equal(room.players.length, 3);
+
+  // Bo cleared his browser and is back as "Bo 2", connected. His old seat is offline. Keep the old seat.
+  const bo2 = watch(SEATS.bo2, 'Bo 2');
+  await bo2.until((c) => c.state, 'Bo 2 in the room');
+  const res = await onStats({ do: 'room.consolidate', keys: [key(SEATS.bo), key(SEATS.bo2)], keep: key(SEATS.bo) });
+  assert.deepEqual(res, { status: 200, ok: true, name: 'Bo', removed: ['Bo 2'] });
+  await bo2.until((c) => c.closed !== null, 'his connection to be handed over');
+  assert.equal(bo2.closed, 4002);
+  assert.equal(bo2.moved, false);
+
+  // The same browser reconnects, as it does by itself, and is Bo: one seat, one record, both histories.
+  const bo = watch(SEATS.bo2, 'Bo 2');
+  await bo.until((c) => c.state && c.board, 'Bo back in the room');
+  assert.deepEqual(bo.state.players.map((p) => p.name).sort(), ['Ana', 'Bo']);
+  assert.equal(bo.state.players.find((p) => p.id === bo.state.you).name, 'Bo');
+  assert.deepEqual(record(bo.board.find((x) => x.name === 'Bo')), { games: 10, wins: 4, points: 150 });
+  assert.equal(bo.board.filter((x) => x.name.startsWith('Bo')).length, 1);
+  room = await onStats();
+  assert.deepEqual(room.players.map((p) => [p.id, p.name, p.online]), [['pAna', 'Ana', false], ['pBo', 'Bo', true]]);
+  bo.ws.close();
+
+  // Everything at once, last of all.
+  assert.deepEqual(await onStats({ do: 'room.statsReset' }), { status: 200, ok: true, n: 3 });
+  room = await onStats();
+  assert.equal(room.statsKept, 0);
+  assert.deepEqual(room.absent, []);
+  assert.ok(room.players.every((p) => p.games === 0));
+});
+

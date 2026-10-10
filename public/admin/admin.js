@@ -15,6 +15,8 @@ let lastOk = 0;
 let timer = null;
 let signature = { rooms: '', server: '', log: '', tally: '' };
 const open = new Map(); // room code -> whether its player list is unfolded (when the admin has said)
+const picked = new Map(); // room code -> the stats keys ticked for making into one player
+let editing = null; // { code, id } or { code, key }: the name being changed, if one is
 const view = { tab: store.get('adminTab', 'rooms'), search: '', filter: 'all' };
 
 // ───────────────────────── talking to the server ─────────────────────────
@@ -155,6 +157,33 @@ function expiryLine(room) {
   return `${text} <small>${note}</small>`;
 }
 
+/** "5 games, went out 2 (40%), 12.4 average", or a dash for someone who has not finished a game. */
+function recordLine(x) {
+  if (!x.games) return '<span class="muted">No games yet</span>';
+  return `<b>${Number(x.wins)}</b> out of ${plural(Number(x.games), 'game')} <small>${Math.round((x.wins / x.games) * 100)}% won, ${(Math.round((x.points / x.games) * 10) / 10).toFixed(1)} points a game</small>`;
+}
+
+/** The tick box that marks someone for being made into one player with others. Computer players have none. */
+function pickBox(room, x) {
+  if (x.bot) return '<td class="ppick"></td>';
+  const on = picked.get(room.code)?.has(x.key);
+  return `<td class="ppick"><input type="checkbox" data-pick data-code="${esc(room.code)}" data-key="${esc(x.key)}"${on ? ' checked' : ''} aria-label="Tick ${esc(x.name)} to make into one player with others"></td>`;
+}
+
+/** A name that turns into a box to type in when it is clicked, with a tick to save and a cross to cancel. */
+function nameCell(room, x, ref) {
+  const mine = editing && editing.code === room.code && ((ref.id && editing.id === ref.id) || (ref.key && editing.key === ref.key));
+  const attrs = `data-code="${esc(room.code)}"${ref.id ? ` data-id="${esc(ref.id)}"` : ''}${ref.key ? ` data-key="${esc(ref.key)}"` : ''}`;
+  if (mine) {
+    return `<form class="name-edit" ${attrs}>
+      <input type="text" name="name" maxlength="20" value="${esc(x.name)}" autocomplete="off" spellcheck="false" aria-label="New name for ${esc(x.name)}">
+      <button class="tool tool-small name-save" type="submit" title="Save the name">${icon('check')}<span class="sr">Save</span></button>
+      <button class="tool tool-small" type="button" data-act="rename-cancel" title="Cancel">${icon('close')}<span class="sr">Cancel</span></button>
+    </form>`;
+  }
+  return `<button class="pname pname-btn" type="button" data-act="rename-player" ${attrs} title="Click to rename">${esc(x.name)}</button>`;
+}
+
 function playerRow(room, p) {
   const badges = [
     p.host ? '<span class="tagp">host</span>' : '',
@@ -169,18 +198,45 @@ function playerRow(room, p) {
   const where = p.ips.length ? p.ips.map((ip) => `<code>${esc(ip)}</code>`).join(' ') : '<span class="muted">—</span>';
   const game = [p.cards != null ? plural(p.cards, 'card') : '', p.score != null ? `${p.score} pts` : ''].filter(Boolean).join(', ');
   const turn = room.turn === p.id ? ' is-turn' : '';
+  const c = esc(room.code);
   return `<tr class="${p.online || p.bot ? '' : 'is-away'}${turn}">
-    <th scope="row"><span class="pdot" style="--p:${hex(p.color)};--on-p:${onColor(hex(p.color))}">${esc(initials(p.name))}</span><span class="pname">${esc(p.name)}</span>${badges}</th>
+    ${pickBox(room, p)}
+    <th scope="row"><span class="pdot" style="--p:${hex(p.color)};--on-p:${onColor(hex(p.color))}">${esc(initials(p.name))}</span>${p.bot ? `<span class="pname">${esc(p.name)}</span>` : nameCell(room, p, { id: p.id })}${badges}</th>
     <td data-label="Status">${status}</td>
     <td data-label="Address" class="${p.online ? '' : 'is-old'}">${where}</td>
     <td data-label="Browser">${p.device ? esc(p.device) : '<span class="muted">—</span>'}</td>
     <td data-label="In the game">${game ? esc(game) : '<span class="muted">—</span>'}</td>
+    <td data-label="All-time" class="prec">${recordLine(p)}</td>
     <td class="pacts">
-      ${p.bot || p.host ? '' : `<button class="link" type="button" data-act="host" data-code="${esc(room.code)}" data-id="${esc(p.id)}">Make host</button>`}
-      <button class="link link-danger" type="button" data-act="kick" data-code="${esc(room.code)}" data-id="${esc(p.id)}">Remove</button>
+      ${p.bot || p.host ? '' : `<button class="link" type="button" data-act="host" data-code="${c}" data-id="${esc(p.id)}">Make host</button>`}
+      ${p.games ? `<button class="link" type="button" data-act="reset-stats" data-code="${c}" data-key="${esc(p.key)}">Reset stats</button>` : ''}
+      <button class="link link-danger" type="button" data-act="kick" data-code="${c}" data-id="${esc(p.id)}">Remove</button>
     </td>
   </tr>`;
 }
+
+/** Someone with a record here who is not in the room now: gone long ago, or back under another name. */
+function absentRow(room, x) {
+  const c = esc(room.code);
+  return `<tr class="is-away is-absent">
+    ${pickBox(room, x)}
+    <th scope="row"><span class="pdot is-away" style="--p:${hex(x.color)};--on-p:${onColor(hex(x.color))}">${esc(initials(x.name))}</span>${x.bot ? `<span class="pname">${esc(x.name)}</span><span class="tagp">computer</span>` : nameCell(room, x, { key: x.key })}</th>
+    <td data-label="Status"><span class="muted">Not in the room</span></td>
+    <td data-label="Address"><span class="muted">—</span></td>
+    <td data-label="Browser"><span class="muted">—</span></td>
+    <td data-label="In the game"><span class="muted">—</span></td>
+    <td data-label="All-time" class="prec">${recordLine(x)}</td>
+    <td class="pacts"><button class="link" type="button" data-act="reset-stats" data-code="${c}" data-key="${esc(x.key)}">Reset stats</button></td>
+  </tr>`;
+}
+
+/** Everyone in a room who has a seat or a record, as the consolidate dialog needs them. */
+const peopleOf = (room) => [...room.players.filter((p) => !p.bot).map((p) => ({ ...p, live: true })), ...room.absent.filter((x) => !x.bot).map((x) => ({ ...x, live: false, online: false }))];
+/** The ticked ones that are still there. */
+const pickedIn = (room) => {
+  const keys = picked.get(room.code);
+  return keys ? [...new Set(peopleOf(room).filter((x) => keys.has(x.key)).map((x) => x.key))] : [];
+};
 
 function roomCard(room) {
   const mover = room.players.find((p) => p.id === room.turn);
@@ -221,13 +277,19 @@ function roomCard(room) {
       <button class="btn btn-small btn-danger" type="button" data-act="delete" data-code="${c}">Delete</button>
     </div>
     ${
-      room.players.length
+      room.players.length || room.absent.length
         ? `<details class="room-people"${unfolded ? ' open' : ''} data-code="${c}">
-      <summary><span class="chips">${chips}</span><span class="who">${esc(who)}</span></summary>
+      <summary><span class="chips">${chips}</span><span class="who">${esc(who)}${room.absent.length ? `, and ${plural(room.absent.length, 'record')} of people not here now` : ''}</span></summary>
       <div class="ptable-wrap"><table class="ptable">
-        <thead><tr><th scope="col">Player</th><th scope="col">Status</th><th scope="col">Address</th><th scope="col">Browser</th><th scope="col">In the game</th><th scope="col"><span class="sr">Actions</span></th></tr></thead>
-        <tbody>${room.players.map((p) => playerRow(room, p)).join('')}</tbody>
+        <thead><tr><th scope="col"><span class="sr">Tick to make into one player</span></th><th scope="col">Player</th><th scope="col">Status</th><th scope="col">Address</th><th scope="col">Browser</th><th scope="col">In the game</th><th scope="col">All-time</th><th scope="col"><span class="sr">Actions</span></th></tr></thead>
+        <tbody>${room.players.map((p) => playerRow(room, p)).join('')}${room.absent.map((x) => absentRow(room, x)).join('')}</tbody>
       </table></div>
+      <div class="people-acts">
+        <span class="muted small">Tick two or more players who are the same person, then</span>
+        <button class="btn btn-small" type="button" data-act="consolidate" data-code="${c}"${pickedIn(room).length >= 2 ? '' : ' disabled'}>Consolidate${pickedIn(room).length >= 2 ? ` ${pickedIn(room).length} players` : ''}</button>
+        <span class="people-gap"></span>
+        <button class="btn btn-small btn-danger" type="button" data-act="reset-all-stats" data-code="${c}"${room.statsKept ? '' : ' disabled'}>Reset all stats</button>
+      </div>
     </details>`
         : `<p class="room-nobody muted">${esc(who)}</p>`
     }
@@ -242,7 +304,7 @@ function shownRooms() {
       if (view.filter === 'empty' && room.inUse) return false;
       if (view.filter === 'kept' && room.expiry === 'default') return false;
       if (!q) return true;
-      const hay = [room.code, ...room.aliases, ...room.players.flatMap((p) => [p.name, ...p.ips, p.device])].join('\n').toLowerCase();
+      const hay = [room.code, ...room.aliases, ...room.players.flatMap((p) => [p.name, ...p.ips, p.device]), ...room.absent.map((x) => x.name)].join('\n').toLowerCase();
       return hay.includes(q);
     })
     .sort((a, b) => Number(b.inUse) - Number(a.inUse) || b.lastActive - a.lastActive);
@@ -260,9 +322,13 @@ function renderRooms() {
   // Don't pull the page out from under a button that is being pressed or a field in use.
   const busy = document.activeElement && $('#rooms').contains(document.activeElement) && document.activeElement.matches(':active');
   if (busy) return;
+  // A name is being typed: leave the list as it is until that is saved or cancelled.
+  if (editing && $('#rooms .name-edit')) return;
   const focus = document.activeElement?.closest?.('#rooms [data-act]');
+  const ticked = document.activeElement?.closest?.('#rooms [data-pick]');
   signature.rooms = sig;
   $('#rooms').innerHTML = html;
+  if (ticked) $$('#rooms [data-pick]').find((el) => el.dataset.code === ticked.dataset.code && el.dataset.key === ticked.dataset.key)?.focus({ preventScroll: true });
   if (focus) {
     const again = $$('#rooms [data-act]').find((el) => el.dataset.act === focus.dataset.act && el.dataset.code === focus.dataset.code && el.dataset.id === focus.dataset.id);
     again?.focus({ preventScroll: true });
@@ -376,6 +442,12 @@ function eventText(e) {
       return `You sent ${q(e.code)} back to the lobby`;
     case 'admin.room.unban':
       return `You let ${plural(e.n, 'removed player')} back into ${q(e.code)}`;
+    case 'admin.room.statsReset':
+      return e.name ? `You reset ${esc(e.name)}’s stats in ${q(e.code)}` : `You reset all stats in ${q(e.code)} (${plural(Number(e.n), 'player')})`;
+    case 'admin.room.consolidate':
+      return `You made ${Number(e.merged)} players into one in ${q(e.code)}: ${esc(e.name)}`;
+    case 'admin.room.renamePlayer':
+      return `You renamed ${esc(e.was)} to ${esc(e.name)} in ${q(e.code)}`;
     case 'admin.room.host':
       return `You made ${esc(e.name)} the host of ${q(e.code)}`;
     case 'admin.room.kick':
@@ -641,6 +713,56 @@ function askCleanup() {
   });
 }
 
+/** Two or more ticked players who are really one person: which to keep, and under what name. */
+function askConsolidate(room) {
+  const keys = pickedIn(room);
+  const all = peopleOf(room);
+  // One line per record. (The same person can have two seats on one record; the first is enough to show.)
+  const rows = keys.map((key) => all.find((x) => x.key === key));
+  // Keep the seat that is in the match if there is one, else whoever has played most.
+  const best = rows.slice().sort((a, b) => Number(b.score != null) - Number(a.score != null) || b.games - a.games || Number(b.live) - Number(a.live))[0];
+  const total = rows.reduce((sum, x) => ({ games: sum.games + x.games, wins: sum.wins + x.wins, points: sum.points + x.points }), { games: 0, wins: 0, points: 0 });
+  const seated = rows.filter((x) => x.live).length;
+  const where = (x) => (x.live ? (x.online ? 'online now' : 'in the room, offline') : 'not in the room');
+  const submit = (f) => ({ do: 'room.consolidate', code: room.code, keys, keep: f.keep, name: f.name });
+  submit.done = (answer) => {
+    picked.delete(room.code);
+    return `Now one player: ${answer.name}`;
+  };
+  ask({
+    title: `Make ${keys.length} players into one`,
+    ok: 'Consolidate',
+    danger: true,
+    body: `
+      <p>Their records are added together: <b>${total.wins}</b> out of ${plural(total.games, 'game')} in all. From now on, games played from any of their browsers count for the one player.</p>
+      <fieldset class="keep-list"><legend>Keep</legend>
+        ${rows
+          .map(
+            (x) => `<label class="choice"><input type="radio" name="keep" value="${esc(x.key)}" data-name="${esc(x.name)}"${x === best ? ' checked' : ''}>
+          <span><b>${esc(x.name)}</b><small>${esc(where(x))}${x.score != null ? `, ${x.score} points in the match` : ''}. ${x.games ? `${x.wins} out of ${plural(x.games, 'game')}` : 'No games yet'}.</small></span></label>`,
+          )
+          .join('')}
+      </fieldset>
+      <label class="field"><span>Name to go by</span>
+        <input type="text" name="name" maxlength="20" autocomplete="off" spellcheck="false" value="${esc(best.name)}"></label>
+      ${
+        seated > 1
+          ? '<p class="muted small"><b class="warn">More than one of them has a seat in the room.</b> The one you keep stays, with its place and score in the match; the others leave the room, and any cards they hold in a game on the table leave with them. If the one you keep is offline and another is connected, the connected browser takes over the kept seat.</p>'
+          : '<p class="muted small">Nobody is taken out of the room by this.</p>'
+      }
+      <p class="muted small">This cannot be undone.</p>`,
+    ready: (body) => {
+      const name = $('[name=name]', body);
+      let typed = false;
+      name.addEventListener('input', () => (typed = true));
+      body.addEventListener('change', (event) => {
+        if (event.target.name === 'keep' && !typed) name.value = event.target.dataset.name;
+      });
+    },
+    submit,
+  });
+}
+
 function askConfirm({ title, text, ok, body, done, danger = false }) {
   const submit = () => body;
   submit.done = () => done;
@@ -710,8 +832,87 @@ document.addEventListener('click', async (event) => {
     case 'kick':
       if (player) return askKick(room, player);
       return;
+    case 'rename-player':
+      editing = el.dataset.id ? { code: room.code, id: el.dataset.id } : { code: room.code, key: el.dataset.key };
+      return redrawRooms(() => {
+        const input = $('#rooms .name-edit input');
+        input?.focus();
+        input?.select();
+      });
+    case 'rename-cancel':
+      editing = null;
+      return redrawRooms();
+    case 'consolidate':
+      if (pickedIn(room).length >= 2) return askConsolidate(room);
+      return;
+    case 'reset-stats': {
+      const x = peopleOf(room).find((y) => y.key === el.dataset.key) ?? [...room.players, ...room.absent].find((y) => y.key === el.dataset.key);
+      if (!x) return;
+      return askConfirm({
+        title: `Reset ${x.name}’s stats?`,
+        text: `${esc(x.name)}’s all-time record in ${esc(room.code)} goes back to nothing: ${x.wins} out of ${plural(x.games, 'game')}, gone. Nobody else’s is touched, and the score in the match being played stays as it is. This cannot be undone.`,
+        ok: 'Reset stats',
+        danger: true,
+        body: { do: 'room.statsReset', code: room.code, key: x.key },
+        done: `${x.name}’s stats are reset`,
+      });
+    }
+    case 'reset-all-stats':
+      return askConfirm({
+        title: `Reset all stats in ${room.code}?`,
+        text: `The all-time record of every player in this room goes back to nothing: ${plural(room.statsKept, 'player')} in all. The score in the match being played stays as it is. This cannot be undone.`,
+        ok: 'Reset all stats',
+        danger: true,
+        body: { do: 'room.statsReset', code: room.code },
+        done: 'All stats in the room are reset',
+      });
     default:
   }
+});
+
+/** Draws the room list again now, whatever the last answer from the server looked like. */
+function redrawRooms(then) {
+  signature.rooms = '';
+  if (data) renderRooms();
+  then?.();
+}
+
+// A name being changed: Enter or the tick saves it, Escape or the cross cancels.
+document.addEventListener('submit', async (event) => {
+  const form = event.target.closest?.('.name-edit');
+  if (!form) return;
+  event.preventDefault();
+  const name = form.elements.name.value;
+  const body = { do: 'room.renamePlayer', code: form.dataset.code, name };
+  if (form.dataset.id) body.id = form.dataset.id;
+  else body.key = form.dataset.key;
+  try {
+    const answer = await call('act', body);
+    editing = null;
+    toast(`Renamed to ${answer.name}`);
+    signature.rooms = '';
+    await refresh();
+  } catch (err) {
+    toast(err.message, { error: true });
+    form.elements.name.focus();
+  }
+});
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && editing && event.target.closest?.('.name-edit')) {
+    editing = null;
+    redrawRooms();
+  }
+});
+
+// Ticking players to make into one. The ticks are remembered here, so they survive the list being redrawn.
+document.addEventListener('change', (event) => {
+  const box = event.target.closest?.('[data-pick]');
+  if (!box) return;
+  const keys = picked.get(box.dataset.code) ?? new Set();
+  if (box.checked) keys.add(box.dataset.key);
+  else keys.delete(box.dataset.key);
+  picked.set(box.dataset.code, keys);
+  redrawRooms();
 });
 
 // Remember which player lists were unfolded or folded by hand.

@@ -28,6 +28,8 @@ const solid = (d) => `<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="
 export const ICONS = {
   copy: stroke('<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/>'),
   check: stroke('<path d="M5 12.5l4.5 4.5L19 7.5"/>'),
+  trend: stroke('<path d="M4 16l5-5 4 4 7-8"/><path d="M15 7h5v5"/>'),
+  chart: stroke('<path d="M5 20V10M12 20V4M19 20v-7"/>'),
   help: stroke('<circle cx="12" cy="12" r="9"/><path d="M9.6 9.3a2.5 2.5 0 1 1 3.6 2.3c-.8.5-1.2 1-1.2 2"/><path d="M12 17v.01"/>'),
   gear: stroke('<path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/>'),
   soundOn: stroke('<path d="M4 10v4h3l5 4V6L7 10H4z"/><path d="M16 9a4 4 0 0 1 0 6M18.5 6.5a8 8 0 0 1 0 11"/>'),

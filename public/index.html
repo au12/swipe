@@ -170,6 +170,14 @@
     <div class="dialog-body" id="player-body"></div>
   </dialog>
 
+  <dialog id="dlg-stats" class="dialog">
+    <div class="dialog-head">
+      <h2>All-time stats <small id="stats-room"></small></h2>
+      <button class="tool" type="button" data-close title="Close"><span data-icon="close"></span><span class="sr">Close</span></button>
+    </div>
+    <div class="dialog-body" id="stats-body"></div>
+  </dialog>
+
   <dialog id="dlg-rules" class="dialog">
     <div class="dialog-head">
       <h2>How to play</h2>
@@ -198,6 +206,7 @@
       <p>Aces are 1. Two to nine are face value. Jacks, queens and kings are 10. Tens are 20, so don’t get caught holding them.</p>
       <p>Scores carry over from game to game. The match ends when someone reaches the points limit (100 unless the host changes it), and the lowest total wins.</p>
       <p><strong>Who goes first</strong> is decided by the cards, every game: whoever has the highest total in their hand and face-up row together leads. Tens count as nothing for this (they are worth plenty already), and a tie is settled by chance.</p>
+      <p>Every room also keeps <strong>all-time stats</strong>: how often each player has gone out, and what they are left holding on average. Open them from the Scores panel.</p>
       <h3>Chat</h3>
       <p>The <strong>Chat</strong> box sits just above the play by play. A new message also shows for a few seconds at the top of the screen, where it covers no cards; tap it to reply.</p>
       <h3>Notifications and the app</h3>

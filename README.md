@@ -23,6 +23,7 @@ Swipe is built on the same server as [Tradecraft](https://github.com/au12/tradec
 - An optional turn clock. When it runs out that player is skipped, with a banner nobody can miss, and draws penalty cards. The host can pause it or add 30 seconds.
 - Turn notifications: a push when it is your turn and you are not looking, even with the phone locked. See [Notifications and installing](#notifications-and-installing).
 - A play-by-play log, newest move first, and a running scoreboard.
+- All-time stats for each room, opened from the Scores panel: how often each player has gone out, how many games they have played and their win rate, best win rate first; and what each is left holding on average, lowest first, with a ribbon for the Most Consistent and one for whoever Needs Improvement.
 - Chat for the room, just above the log. A new message also shows for a few seconds in a banner at the top of the screen, placed so it never covers a card, with a sound in the manner of an old instant messenger. Anyone who is away and has notifications on gets it as a notification.
 - Tap the pile to see what is in it: how many of each rank you would be picking up, and what they add up to.
 
@@ -59,6 +60,7 @@ The rule sheet leaves a few things open. These are the calls the game makes; eac
 - **Tens go down one at a time.** Each one swipes and earns another turn, so a second ten can follow on that turn. A blind card that turns out to be a ten is played automatically.
 - **Going out counts even if the last card is a swipe.** A last card that is too high does not go out: the pile comes home first.
 - **Who leads** is decided by the cards in every game, not by who went out last. Each player's twelve hand cards and four face-up cards are added up at their scoring values, except that tens count as nothing (a hand full of tens is advantage enough), and the highest total leads. Blind cards are not counted. Ties are settled at random among those tied. The sum is `leadTotal` in [`server/game.js`](server/game.js). Tens are still 20 each against whoever is left holding them.
+- **All-time stats count finished games only.** A game somebody went out of adds one game for everyone who was still in it, a win for whoever went out, and the points each was left with (zero for the winner, so the average rewards going out). A game that was called off counts for nothing, and neither does one a player left part-way through, for that player. Records are kept per room and per browser, so the same person on a new browser starts a second record until the admin consolidates the two. Computer players have records too.
 - **What is in the pile is public.** Every card in it was played face up, so anyone may see how many of each rank it holds. Their order and suits stay buried.
 - **The match ends when someone reaches the limit** (100 is enough; it does not have to be passed). Ties for the lowest score share the win.
 - **Leaving mid-game** takes your cards out of play. Your score is kept in case you come back.
@@ -165,6 +167,10 @@ Set `ADMIN_PASSWORD` and restart, then open `/admin` (for example `https://swipe
 - Who is in it: name, whether they are connected and looking at the game, the address they connect from, their device and browser, cards in hand and score, and whether they are the host, a computer player or watching.
 - **Change expiry.** The usual way (`ROOM_TTL_HOURS` after it was last used), never, or on a date and time you pick. A room is never removed while someone is in it; if its time comes then, it goes when the last person leaves.
 - **Rename.** The name is the room's link, so whatever you type is fitted to lower-case letters, numbers and hyphens: "Friday Night Cards!" becomes `friday-night-cards`. Or ask for a new random name. People in the room move with it, and the old link keeps working unless you untick that, which cuts off everyone who only has the old one.
+- Each player's **all-time record** in that room, and the records of people who have played there but are not in it now.
+  - **Click a name** to change it: it becomes a box to type in, with a tick to save and a cross to cancel (Enter and Escape do the same). The player's browser does not change it back; they still can, themselves.
+  - **Reset stats** for one player, or **Reset all stats** for the room. Both ask first.
+  - **Consolidate**: tick two or more players who are really the same person (someone who cleared their browser and came back as "Bo 2", say) and make them one. Their games, wins and points are added together, and from then on games from any of those browsers count for that one player. If more than one of them has a seat in the room, the one you choose to keep stays, with its place and score in the match, and the others leave; a browser that is connected takes over a kept seat that is offline, so the person carries on where they were.
 - **Message** the people in a room; **Lock** it; **End this game** or send it **Back to the lobby**; make someone the host; **Remove** a player (kept out, or free to return); let removed players back in; **Delete** the room, which tells whoever is in it that it was closed.
 - Search by room, player or address. **New room** (named if you like, no server password needed), **Message everyone**, and **Clean up**, which removes empty rooms idle for as long as you choose and leaves alone any whose expiry you set.
 
@@ -178,6 +184,7 @@ How it is protected:
 - A sign-in is a random token in a cookie that scripts cannot read and other sites cannot send (`HttpOnly`, `SameSite=Strict`, and `Secure` when you arrive over HTTPS). It lasts `ADMIN_SESSION_HOURS` and is held in memory, so restarting the server signs you out.
 - Nothing is changed for a request that another website could make your browser send.
 - Addresses and browsers are kept in memory while someone is connected. They are never written to `rooms.json` or to the backup.
+- All-time stats are saved with the room in `rooms.json` too, keyed by a hash of each browser's seat token rather than the token itself.
 - A room's last hundred chat messages are saved with it in `rooms.json`, so they survive a restart and are in the backup. They go when the room does.
 - Use a different password from `CREATE_PASSWORD`, and reach the page over HTTPS.
 
@@ -273,6 +280,7 @@ public/       the client: plain HTML, CSS and ES modules, served as-is
   js/sound.js   sound effects, synthesised with Web Audio
   js/push.js    notifications from the browser's side: permission, subscribing
   js/chat.js    the chat panel and the banner a new message shows in
+  js/stats.js   the all-time stat board
   js/app.js     the connection, taps, dialogs, and the order things animate in
   sw.js         the service worker: shows notifications, makes the app installable
   admin/        the admin page: one HTML file, one script, one stylesheet
