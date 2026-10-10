@@ -7,7 +7,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import WebSocket from 'ws';
 import http from 'node:http';
-import { judge, order } from '../public/js/rules.js';
+import { judge, order, points } from '../public/js/rules.js';
 import { browserKeys, checkVapid, decrypt } from './support/browser-side.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -143,6 +143,8 @@ async function takeTurn(clients) {
 async function playOut(clients) {
   for (let i = 0; i < 5000 && clients[0].state.round.phase === 'play'; i++) await takeTurn(clients);
   assert.equal(clients[0].state.round.phase, 'over');
+  // Everyone has been sent the ending by the time anything is checked.
+  await settle(clients, (st) => st.round?.phase === 'over', 'the end of the game');
 }
 
 test('serves the app and a health check, and nothing outside public/', async () => {
@@ -162,7 +164,7 @@ test('a room that does not exist is refused', async () => {
   assert.equal(c.fatal.code, 'no-room');
 });
 
-test('lobby: everyone gets a seat and a colour of their own; only the host can deal', async () => {
+test('lobby: everyone gets a seat and a color of their own; only the host can deal', async () => {
   const { all, host } = await tableOf(['Ana', 'Bo']);
   const [ana, bo] = all;
   assert.equal(ana.state.hostId, ana.id(), 'first player in is the host');
@@ -207,6 +209,11 @@ test('the pile is sent as a face-up top and face-down cards beneath it', async (
       const under = pile.count - pile.top.length;
       assert.equal(pile.backs.length, Math.min(under, 40));
       assert.ok(pile.backs.every((b) => b === 0 || b === 1), 'buried cards arrive as backs only');
+      // What the pile holds, rank by rank, is public: it adds up, includes the top run, and says nothing of suits or order.
+      assert.equal(Object.values(pile.ranks).reduce((a, b) => a + b, 0), pile.count);
+      if (pile.top.length) assert.ok(pile.ranks[pile.top[0].r] >= pile.top.length);
+      assert.ok(Object.keys(pile.ranks).every((rank) => order(rank) > 0 && rank !== '10'), 'ranks only, and never a ten');
+      assert.deepEqual(pile.ranks, all[0].state.round.pile.ranks, 'everyone is told the same');
       assert.ok(pile.top.every((card) => card.r === pile.top[0].r), 'the top run is one rank');
     }
     if (all[0].state.round.pile.backs.length >= 3) checked += 1;
@@ -308,7 +315,7 @@ test('a flipped blind card is shown to the whole table and has to be played', as
   assert.fail('never got to flip a blind card');
 });
 
-test('a full match: scores add up, the winner leads the next game, the limit ends it', async () => {
+test('a full match: scores add up, the highest cards lead every game, the limit ends it', async () => {
   const { all, host } = await tableOf(['Ana', 'Bo', 'Cy']);
   assert.equal(await host.do('settings', { patch: { limit: 20 } }), null);
   assert.match(await all[1].do('settings', { patch: { limit: 50 } }), /Only the host/);
@@ -335,8 +342,17 @@ test('a full match: scores add up, the winner leads the next game, the limit end
       const winner = all[0].state.round.winner;
       await host.do('start');
       await settle(all, (st) => st.round.phase === 'play' && st.round.no === i + 2, 'the next deal');
-      assert.equal(all[0].state.round.turn, winner, 'the last winner leads');
-      assert.equal(all[0].state.round.start.why, 'winner');
+      // Who went out last time makes no difference: the cards decide, as they did in the first game.
+      const start = all[0].state.round.start;
+      assert.equal(start.why, 'high');
+      assert.equal(all[0].state.round.turn, start.pid);
+      void winner;
+      for (const c of all) {
+        const seat = c.state.round.seats[c.id()];
+        const mine = [...c.state.round.mine, ...seat.up].reduce((sum, card) => sum + (card.r === '10' ? 0 : points(card.r)), 0);
+        assert.ok(mine <= start.total, 'nobody holds more than the leader');
+        if (c.id() === start.pid) assert.equal(mine, start.total, 'the leader’s own cards add up to the total shown');
+      }
       await playOut(all);
     }
   }
@@ -450,9 +466,9 @@ test('host controls: lock, hand over, remove', async () => {
   assert.match(await host.do('start'), /Only the host/);
   assert.equal(await bo.do('rename', { name: '  Bo   the  Second ' }), null);
   await host.until((x) => x.state.players.some((p) => p.name === 'Bo the Second'), 'rename');
-  const colour = bo.me().color;
+  const color = bo.me().color;
   await bo.do('recolor');
-  await bo.until((x) => x.me().color !== colour, 'a new colour');
+  await bo.until((x) => x.me().color !== color, 'a new color');
 });
 
 test('bad input never takes the server down', async () => {
@@ -603,3 +619,31 @@ test('a seat code carries a seat from one browser to another', async () => {
   await reuse.until((x) => x.fatal, 'refusal');
   assert.equal(reuse.claim.ok, false, 'a code works once');
 });
+
+test('chat over real connections: the conversation so far on arrival, then each message as it is sent', async () => {
+  const { code, all } = await tableOf(['Ana', 'Bo']);
+  const [ana, bo] = all;
+  const heard = (c) => c.chat ?? [];
+  for (const c of all) {
+    c.chat = [];
+    c.ws.on('message', (raw) => {
+      const msg = JSON.parse(raw);
+      if (msg.t === 'chat' && msg.m) c.chat.push(msg.m);
+    });
+  }
+  assert.equal(await ana.do('chat', { text: 'Deal me in.' }), null);
+  assert.equal(await bo.do('chat', { text: 'Shuffling <now>' }), null);
+  await ana.until(() => heard(ana).length === 2 && heard(bo).length === 2, 'both messages');
+  assert.deepEqual(heard(bo).map((m) => `${m.name}: ${m.text}`), ['Ana: Deal me in.', 'Bo: Shuffling <now>']);
+  assert.match(await ana.do('chat', { text: '   ' }), /Type a message/);
+
+  // A third person walks in and is caught up before anything else.
+  const first = await new Promise((resolve) => {
+    const ws = new WebSocket(`ws://127.0.0.1:${PORT}/ws`);
+    ws.on('open', () => ws.send(JSON.stringify({ t: 'hello', room: code, token: 'token-Cy-chat-0123456789', name: 'Cy' })));
+    ws.once('message', (raw) => (resolve(JSON.parse(raw)), ws.close()));
+  });
+  assert.equal(first.t, 'chat');
+  assert.deepEqual(first.all.map((m) => m.text), ['Deal me in.', 'Shuffling <now>']);
+});
+

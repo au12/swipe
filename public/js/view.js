@@ -5,7 +5,7 @@
 
 import { $, esc, formatClock, icon, initials, onColor, plural, possessive, seeded } from './util.js';
 import { backHTML, faceHTML } from './cards.js';
-import { TEN, judge, order, rankName } from './rules.js';
+import { TEN, judge, order, points, rankName } from './rules.js';
 
 // ───────────────────────── who is who ─────────────────────────
 
@@ -30,7 +30,7 @@ const luminance = ([r, g, b]) => {
 };
 
 /**
- * A player's colour as a tabletop: the same hue, taken deep enough that white
+ * A player's color as a tabletop: the same hue, taken deep enough that white
  * cards and white type sit comfortably on it.
  */
 export function matColor(hex) {
@@ -44,7 +44,7 @@ export function matColor(hex) {
   return `#${mixed.map((v) => v.toString(16).padStart(2, '0')).join('')}`;
 }
 
-/** Inline custom properties that tint an element with a player's colour. */
+/** Inline custom properties that tint an element with a player's color. */
 export const tint = (hex) => `--p:${hex};--on-p:${onColor(hex)}`;
 
 function avatar(p, extra = '') {
@@ -54,28 +54,42 @@ function avatar(p, extra = '') {
 // ───────────────────────── words ─────────────────────────
 
 const COUNT = ['no', 'a', 'two', 'three', 'four'];
-/** "a king", "an eight", "two sevens" */
-export function setWords(rank, n) {
-  if (n === 1) return `${rank === 'A' || rank === '8' ? 'an' : 'a'} ${rankName(rank)}`;
-  return `${COUNT[n] ?? n} ${rankName(rank, n)}`;
+const RANK_CAPS = { A: 'ACE', J: 'JACK', Q: 'QUEEN', K: 'KING' };
+
+/**
+ * A card's value as it is written in the play by play: in bold, the court
+ * cards and the ace as a word in capitals, everything else as its number.
+ * "KING", "KINGS", "10", "9s".
+ */
+export function rankTag(rank, n = 1) {
+  const word = RANK_CAPS[rank];
+  const label = word ? `${word}${n === 1 ? '' : 'S'}` : `${rank}${n === 1 ? '' : 's'}`;
+  return `<b class="rk">${esc(label)}</b>`;
 }
 
-/** One log entry as a sentence. */
+/** "a KING", "an 8", "two 7s", with the value in bold. */
+export function setTag(rank, n) {
+  if (n === 1) return `${rank === 'A' || rank === '8' ? 'an' : 'a'} ${rankTag(rank)}`;
+  return `${COUNT[n] ?? n} ${rankTag(rank, n)}`;
+}
+
+/** One log entry as a sentence. The result is HTML: names are escaped here, and card values are in bold. */
 export function describe(state, me, e) {
-  const name = e.by ? who(state, me, e.by) : '';
-  const again = (id) => (id === me.id ? 'You go again.' : `${who(state, me, id)} goes again.`);
+  const name = e.by ? esc(who(state, me, e.by)) : '';
+  const again = (id) => (id === me.id ? 'You go again.' : `${esc(who(state, me, id))} goes again.`);
   switch (e.k) {
     case 'start':
+      // (Games saved before the lead was decided by the cards every time may still say 'winner'.)
       return e.why === 'high'
-        ? `${name} ${e.by === me.id ? 'hold' : 'holds'} the highest hand (${e.total} points) and ${e.by === me.id ? 'lead' : 'leads'}.`
+        ? `${name} ${e.by === me.id ? 'hold' : 'holds'} the highest cards (${Number(e.total)} points, tens not counted) and ${e.by === me.id ? 'lead' : 'leads'}.`
         : `${name} went out last game and ${e.by === me.id ? 'lead' : 'leads'} this one.`;
     case 'flip':
-      return `${name} flipped a blind card: ${setWords(e.r, 1)}.`;
+      return `${name} flipped a blind card: ${setTag(e.r, 1)}.`;
     case 'play': {
-      const set = setWords(e.r, e.n);
-      if (e.effect === 'pickup') return `${name} picked up ${plural(e.pickup, 'card')} and led with ${set}.`;
+      const set = setTag(e.r, e.n);
+      if (e.effect === 'pickup') return `${name} picked up ${plural(Number(e.pickup), 'card')} and led with ${set}.`;
       if (e.effect === 'swipe') {
-        const made = e.swipe === 'ten' ? `${name} played ${set}.` : e.n === 4 ? `${name} played ${set}.` : `${name} made it four ${rankName(e.r, 4)}.`;
+        const made = e.swipe === 'ten' ? `${name} played ${set}.` : e.n === 4 ? `${name} played ${set}.` : `${name} made it four ${rankTag(e.r, 4)}.`;
         const then = e.again ? again(e.by) : e.swipe === 'four' && e.n === 4 && e.swiped > 4 ? 'The turn passes.' : '';
         return `${made} Swipe! ${then}`.trim();
       }
@@ -84,14 +98,14 @@ export function describe(state, me, e) {
     case 'out':
       return `${name} ${e.by === me.id ? 'are' : 'is'} out of cards.`;
     case 'drop':
-      return `${e.by === me.id ? 'You' : (playerOf(state, e.by)?.name ?? e.name ?? 'Someone')} left the game. Those cards are out.`;
+      return `${e.by === me.id ? 'You' : esc(playerOf(state, e.by)?.name ?? e.name ?? 'Someone')} left the game. Those cards are out.`;
     case 'timeout':
       return `${name} ran out of time.`;
     case 'skip': {
       const was = e.by === me.id ? 'were' : 'was';
       if (!e.drew) return `${name} ran out of time and ${was} skipped.`;
       const why = e.forced && e.drew > 3 ? ' With nothing to play, that’s one for every card in the pile.' : '';
-      return `${name} ran out of time, ${was} skipped and drew ${plural(e.drew, 'card')}.${why}`;
+      return `${name} ran out of time, ${was} skipped and drew ${plural(Number(e.drew), 'card')}.${why}`;
     }
     case 'end':
       return 'The game was called off.';
@@ -136,17 +150,17 @@ export function renderTurn(state, me) {
   if (!r) return;
   const el = $('#turn');
   let title;
-  let sub;
+  let sub; // HTML
   if (r.phase === 'deal') {
     title = 'Shuffling';
-    sub = `Game ${r.no}. ${plural(r.decks, 'deck')} mixed together, 20 cards each.`;
+    sub = esc(`Game ${r.no}. ${plural(r.decks, 'deck')} mixed together, 20 cards each.`);
   } else {
     title = r.turn === me.id ? 'Your turn' : `${possessive(playerOf(state, r.turn)?.name ?? 'Someone')} turn`;
     sub = lastLine(state, me);
   }
   el.innerHTML = `<div class="turn-main">
       <h2 class="turn-name${r.turn === me.id && r.phase === 'play' ? ' is-you' : ''}">${esc(title)}</h2>
-      <p class="turn-sub">${esc(sub)}</p>
+      <p class="turn-sub">${sub}</p>
     </div>
     <div class="timer" id="timer" hidden>
       <span class="timer-value" id="timer-value" role="timer" aria-live="off"></span>
@@ -249,7 +263,7 @@ const pileHeight = (i) => Math.min(PILE_TALL, 0.07 * Math.sqrt(i));
  * `gx`/`gy` is the spot on the mat directly beneath it, and `floor` how far
  * down the screen the mat under the middle of the pile is.
  *
- * `backs` lists the back colours of the buried cards, ending with the one
+ * `backs` lists the back colors of the buried cards, ending with the one
  * directly under the top run. It may be shorter than the pile is deep.
  */
 export function pileSpec(roundId, count, top, backs = []) {
@@ -349,7 +363,53 @@ export function renderPile(state, pile) {
   $('#pile-right').innerHTML = `<div class="pile-count" title="Cards in the pile"><b>${pile.count}</b><span>in the pile</span></div>
     <p class="pile-rule">${rule}${top && !doomed ? '<small>or a ten</small>' : ''}</p>
     ${more ? `<p class="pile-more">${more}</p>` : ''}`;
-  $('#pile-left').innerHTML = r.burned ? `<p class="pile-burned"><b>${r.burned}</b><span>swiped away</span></p>` : '';
+  // So that looking inside the pile is not a secret: a note beside it that is also a button.
+  const tap = window.matchMedia('(hover: hover) and (pointer: fine)').matches ? 'Click' : 'Tap';
+  const hint = pile.count ? `<button type="button" class="pile-hint" data-act="peek" aria-controls="pile-peek">${icon('eye')}<span>${tap} the pile to look inside</span></button>` : '';
+  $('#pile-left').innerHTML = (r.burned ? `<p class="pile-burned"><b>${r.burned}</b><span>swiped away</span></p>` : '') + hint;
+
+  // The pile is a button, and the list of what is in it keeps up with the pile while it is open.
+  const peek = $('#pile-peek');
+  if (peek) {
+    if (!pile.count) peek.hidden = true;
+    else if (!peek.hidden) showPeek(pile);
+    el.setAttribute('aria-expanded', String(!peek.hidden));
+    el.setAttribute('aria-label', pile.count ? `The pile: ${plural(pile.count, 'card')}. Show what is in it.` : 'The pile is empty.');
+    $('#pilezone').classList.toggle('is-peeking', !peek.hidden);
+  }
+}
+
+/** Fills in the list of what is in the pile and keeps it on the mat: a tall one is slid down or up to fit. */
+export function showPeek(pile) {
+  const peek = $('#pile-peek');
+  peek.innerHTML = peekHTML(pile);
+  peek.hidden = false;
+  peek.style.setProperty('--nudge', '0px');
+  const box = peek.getBoundingClientRect();
+  const mat = $('#mat').getBoundingClientRect();
+  const room = 7;
+  let nudge = 0;
+  if (box.top < mat.top + room) nudge = mat.top + room - box.top;
+  else if (box.bottom > mat.bottom - room) nudge = mat.bottom - room - box.bottom;
+  peek.style.setProperty('--nudge', `${Math.round(nudge)}px`);
+}
+
+/**
+ * What is in the pile, rank by rank, highest first: what you would be taking
+ * if you picked it up. Every card in the pile was played face up, so this is
+ * only what a good memory would tell you.
+ */
+export function peekHTML(pile) {
+  const ranks = Object.entries(pile.ranks ?? {})
+    .filter(([, n]) => n > 0)
+    .sort((a, b) => order(b[0]) - order(a[0]));
+  const total = ranks.reduce((sum, [rank, n]) => sum + points(rank) * n, 0);
+  const label = ([rank, n]) => `${n} ${rankName(rank, n)}`;
+  return `<h3 class="peek-head">In the pile</h3>
+    <ul class="peek-list" aria-label="${esc(ranks.map(label).join(', '))}">${ranks
+      .map(([rank, n]) => `<li title="${esc(label([rank, n]))}"><span class="peek-card">${esc(rank)}</span><span class="peek-n"><i>×</i>${Number(n)}</span></li>`)
+      .join('')}</ul>
+    <p class="peek-total" title="How many cards, and what they would score against whoever is left holding them"><span><b>${pile.count}</b> ${pile.count === 1 ? 'card' : 'cards'},</span> <span><b>${total}</b> ${total === 1 ? 'point' : 'points'}</span></p>`;
 }
 
 // ───────────────────────── hand ─────────────────────────
@@ -583,7 +643,7 @@ export function renderLobby(state, me, ui = {}) {
     </ul>
     ${watching.length ? `<p class="lobby-watching">Watching: ${watching.map((p) => esc(p.name)).join(', ')}</p>` : ''}
     <div class="lobby-you" style="${tint(me.color)}">
-      <span class="lobby-you-label">${avatar(me)}This is your colour.</span>
+      <span class="lobby-you-label">${avatar(me)}This is your color.</span>
       <button type="button" class="btn btn-small btn-mat" data-act="recolor">${icon('dice')}Pick another</button>
       <button type="button" class="btn btn-small btn-mat" data-act="${me.playing ? 'stand' : 'sit'}">${me.playing ? 'Watch instead' : 'Take a seat'}</button>
       ${(ui.push === 'ok' && !state.notify) || ui.push === 'install' ? `<button type="button" class="btn btn-small btn-mat" data-act="push-on">${icon('bell')}Notify me on my turn</button>` : ''}
@@ -756,23 +816,25 @@ function hostPanel(state) {
 }
 
 function logPanel(state, me) {
-  const entries = state.round?.log ?? [];
+  const entries = (state.round?.log ?? []).slice().reverse(); // the latest move at the top
   const cls = (e) => (e.k === 'play' && e.effect === 'swipe' ? ' class="log-swipe"' : e.k === 'play' && e.effect === 'pickup' ? ' class="log-pickup"' : e.k === 'skip' ? ' class="log-skip"' : e.k === 'out' || e.k === 'end' ? ' class="log-end"' : '');
   return `<section class="side">
       <div class="side-row"><h2>Play by play</h2>${state.round ? `<span class="side-meta">Game ${state.round.no}</span>` : ''}</div>
       <ol class="log" id="log">${
-        entries.map((e) => `<li${cls(e)} style="${e.by ? tint(colorOf(state, e.by)) : ''}">${esc(describe(state, me, e))}</li>`).join('') ||
+        entries.map((e) => `<li${cls(e)} style="${e.by ? tint(colorOf(state, e.by)) : ''}">${describe(state, me, e)}</li>`).join('') ||
         '<li class="log-empty">Every card played shows up here.</li>'
       }</ol>
     </section>`;
 }
 
 export function renderRails(state, me) {
+  // The newest move is at the top, which is where a fresh list opens. Someone
+  // who has scrolled down to read back is left where they were.
   const oldLog = $('#log');
-  const stick = !oldLog || oldLog.scrollHeight - oldLog.scrollTop - oldLog.clientHeight < 40;
+  const was = oldLog ? { top: oldLog.scrollTop, height: oldLog.scrollHeight } : null;
   $('#rail-left').innerHTML = scorePanel(state, me) + (me.id === state.hostId ? hostPanel(state) : '');
-  $('#rail-right').innerHTML = logPanel(state, me);
+  $('#rail-log').innerHTML = logPanel(state, me);
   const log = $('#log');
-  if (stick && log) log.scrollTop = log.scrollHeight;
+  if (log && was && was.top > 40) log.scrollTop = was.top + (log.scrollHeight - was.height);
 }
 

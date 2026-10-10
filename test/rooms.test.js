@@ -478,3 +478,142 @@ test('the host playing a turn for someone still plays it, flip and all', async (
   assert.equal(seat.blind[0], null);
   assert.ok(!r.log.some((e) => e.k === 'timeout' || e.k === 'skip'), 'nobody ran out of time');
 });
+
+// ───────────────────────── chat ─────────────────────────
+
+const chats = (person) => person.sent.filter((m) => m.t === 'chat' && m.m).map((m) => m.m);
+
+test('a message reaches everyone in the room, the sender included, and nobody’s cards change', () => {
+  const { rooms, room, r, people } = table(['Ana', 'Bo', 'Cy']);
+  const [ana, bo, cy] = people;
+  const before = JSON.stringify([r.seats, r.pile, r.turn, r.seq]);
+  assert.equal(rooms.act(room, bo.player, { a: 'chat', text: '  Nice   swipe,\n Ana!  ' }), null);
+  for (const p of [ana, bo, cy]) {
+    assert.deepEqual(
+      chats(p).map((m) => ({ ...m, at: null })),
+      [{ id: 1, by: bo.player.id, name: 'Bo', color: bo.player.color, text: 'Nice swipe, Ana!', at: null }],
+      p.name,
+    );
+    assert.equal(p.states().length, 0, 'talk is not a move: no new picture of the table is sent');
+  }
+  assert.ok(Math.abs(chats(ana)[0].at - Date.now()) < 2000);
+  assert.equal(JSON.stringify([r.seats, r.pile, r.turn, r.seq]), before);
+
+  // Someone watching, not dealt in, can talk too.
+  const watcher = tab();
+  const { player: dee } = rooms.connect(room, { token: 'token-for-Dee-0123456789', name: 'Dee' }, watcher);
+  assert.equal(dee.playing, false);
+  assert.equal(rooms.act(room, dee, { a: 'chat', text: 'Room for one more next game?' }), null);
+  assert.equal(chats(ana).at(-1).name, 'Dee');
+  assert.equal(chats(ana).at(-1).id, 2);
+});
+
+test('someone joining is sent what has been said so far, and the room remembers the last hundred', () => {
+  const { rooms, room, people } = table(['Ana', 'Bo']);
+  const [ana] = people;
+  for (let i = 1; i <= 104; i++) {
+    ana.player.said = []; // (not the point of this test)
+    assert.equal(rooms.act(room, ana.player, { a: 'chat', text: `line ${i}` }), null);
+  }
+  assert.equal(room.chat.length, 100);
+  assert.deepEqual([room.chat[0].text, room.chat.at(-1).text], ['line 5', 'line 104']);
+
+  const late = tab();
+  rooms.connect(room, { token: 'token-for-Cy-0123456789ab', name: 'Cy' }, late);
+  const history = late.sent.find((m) => m.t === 'chat');
+  assert.equal(history.all.length, 100);
+  assert.equal(history.all.at(-1).text, 'line 104');
+  assert.ok(late.sent.findIndex((m) => m.t === 'chat') < late.sent.length, 'it arrives with the first picture of the room');
+
+  // And it is saved with the room, without the bookkeeping that paces people.
+  const saved = rooms.serialize().find((x) => x.code === room.code);
+  assert.equal(saved.chat.length, 100);
+  assert.ok(saved.players.every((p) => !('said' in p) && !('chatPushedAt' in p)));
+});
+
+test('empty, oversized and odd messages are tidied or refused; a flood is slowed', () => {
+  const { rooms, room, people } = table(['Ana', 'Bo']);
+  const [ana, bo] = people;
+  for (const text of ['', '   ', '\n\t', null, undefined, 42 === 0, {}, { toString: 1 }, ['hi']]) {
+    assert.match(rooms.act(room, ana.player, { a: 'chat', text }), /Type a message/, JSON.stringify(text));
+  }
+  assert.equal(chats(bo).length, 0);
+
+  assert.equal(rooms.act(room, ana.player, { a: 'chat', text: `<b>hi</b> ${'x'.repeat(400)}` }), null);
+  const long = chats(bo).at(-1).text;
+  assert.equal(long.length, 240);
+  assert.ok(long.startsWith('<b>hi</b> x'), 'markup is kept as plain text: showing it safely is the page’s job');
+  assert.equal(rooms.act(room, ana.player, { a: 'chat', text: 'a\u0000b c\u0007d' }), null);
+  assert.equal(chats(bo).at(-1).text, 'a b c d');
+  assert.equal(rooms.act(room, ana.player, { a: 'chat', text: 7 }), null, 'a number is fine');
+  assert.equal(chats(bo).at(-1).text, '7');
+
+  // Six in ten seconds is the most one person may send. It does not hold anyone else up.
+  ana.player.said = [];
+  for (let i = 0; i < 6; i++) assert.equal(rooms.act(room, ana.player, { a: 'chat', text: `quick ${i}` }), null);
+  const count = chats(bo).length;
+  assert.match(rooms.act(room, ana.player, { a: 'chat', text: 'one too many' }), /a lot of messages/);
+  assert.equal(chats(bo).length, count, 'the refused one went to nobody');
+  assert.equal(rooms.act(room, bo.player, { a: 'chat', text: 'steady on' }), null);
+  ana.player.said = ana.player.said.map((at) => at - 11_000); // ten seconds later
+  assert.equal(rooms.act(room, ana.player, { a: 'chat', text: 'sorry' }), null);
+});
+
+test('a message is pushed to whoever is away, and only to them', async () => {
+  const { rooms, room, people } = table(['Ana', 'Bo', 'Cy', 'Dee']);
+  const [ana, bo, cy, dee] = people;
+  for (const p of [ana, bo, cy]) rooms.act(room, p.player, { a: 'push', sub: subscription(p.name) });
+  // Dee has notifications off. Bo has locked his phone; Cy has closed the tab; Ana is looking at the game.
+  rooms.setVisible(room, bo.player, bo.socket, false);
+  rooms.disconnect(room, cy.player, cy.socket);
+  rooms.setVisible(room, dee.player, dee.socket, false);
+  rooms.pushed.length = 0;
+
+  assert.equal(rooms.act(room, ana.player, { a: 'chat', text: 'Anyone still there?' }), null);
+  await tick();
+  assert.deepEqual(rooms.pushed.map((p) => p.to).sort(), [subscription('Bo').endpoint, subscription('Cy').endpoint].sort());
+  const sent = rooms.pushed[0];
+  assert.deepEqual(
+    { kind: sent.kind, title: sent.title, body: sent.body, tag: sent.tag, url: sent.url },
+    { kind: 'chat', title: `Ana in ${room.code}`, body: 'Anyone still there?', tag: `swipe-chat-${room.code}`, url: `r/${room.code}` },
+  );
+
+  // Its tag and topic are its own, so it never replaces a "your turn" still waiting on the phone.
+  rooms.pushed.length = 0;
+  rooms.notify(room, bo.player, { kind: 'turn', title: 'Your turn', body: 'Play anything.' });
+  await tick();
+  assert.equal(rooms.pushed[0].tag, `swipe-${room.code}`);
+  assert.notEqual(rooms.pushed[0].opts.topic, sent.opts.topic);
+
+  // The sender is never notified of their own message, away or not.
+  rooms.pushed.length = 0;
+  rooms.setVisible(room, bo.player, bo.socket, false);
+  bo.player.chatPushedAt = 0;
+  cy.player.chatPushedAt = 0;
+  assert.equal(rooms.act(room, bo.player, { a: 'chat', text: 'Here, just slow.' }), null);
+  await tick();
+  assert.deepEqual(rooms.pushed.map((p) => p.to), [subscription('Cy').endpoint]);
+});
+
+test('a run of messages does not buzz an absent player again and again', async () => {
+  const { rooms, room, people } = table(['Ana', 'Bo']);
+  const [ana, bo] = people;
+  rooms.act(room, bo.player, { a: 'push', sub: subscription('Bo') });
+  rooms.setVisible(room, bo.player, bo.socket, false);
+  rooms.pushed.length = 0;
+  for (const text of ['one', 'two', 'three']) rooms.act(room, ana.player, { a: 'chat', text });
+  await tick();
+  assert.deepEqual(rooms.pushed.map((p) => p.body), ['one'], 'the phone buzzes once');
+  assert.equal(chats(bo).length, 3, 'all three are waiting in the room');
+  bo.player.chatPushedAt -= 9_000; // a little later
+  rooms.act(room, ana.player, { a: 'chat', text: 'four' });
+  await tick();
+  assert.deepEqual(rooms.pushed.map((p) => p.body), ['one', 'four']);
+  // Back and looking: nothing more is pushed.
+  rooms.setVisible(room, bo.player, bo.socket, true);
+  bo.player.chatPushedAt = 0;
+  ana.player.said = [];
+  rooms.act(room, ana.player, { a: 'chat', text: 'five' });
+  await tick();
+  assert.equal(rooms.pushed.length, 2);
+});

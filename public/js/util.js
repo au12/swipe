@@ -68,7 +68,7 @@ export function formatClock(ms) {
   return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`;
 }
 
-/** Ink for text sitting on a player's colour: dark on light colours, white on the rest. */
+/** Ink for text sitting on a player's color: dark on light colors, white on the rest. */
 export function onColor(hex) {
   const n = Number.parseInt(String(hex).slice(1), 16);
   const lin = (v) => {

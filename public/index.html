@@ -86,8 +86,9 @@
             <header class="turn" id="turn" aria-live="polite"></header>
             <div class="pilezone" id="pilezone">
               <div class="pile-side pile-side-left" id="pile-left"></div>
-              <div class="pile" id="pile"></div>
+              <div class="pile" id="pile" role="button" tabindex="0" data-act="peek" aria-haspopup="dialog" aria-controls="pile-peek" aria-expanded="false"></div>
               <div class="pile-side" id="pile-right"></div>
+              <div class="pile-peek" id="pile-peek" role="dialog" aria-label="What is in the pile" hidden></div>
             </div>
             <div class="tablezone" id="tablezone"></div>
           </section>
@@ -99,7 +100,18 @@
         <section class="mat results" id="results" hidden></section>
       </main>
 
-      <aside class="rail" id="rail-right" aria-label="Game log"></aside>
+      <aside class="rail" id="rail-right" aria-label="Chat and game log">
+        <section class="side chat" id="chat">
+          <h2>Chat</h2>
+          <ol class="chat-list" id="chat-list" aria-live="polite" aria-label="Messages"></ol>
+          <form class="chat-form" id="chat-form" autocomplete="off">
+            <label class="sr" for="chat-input">Message to the table</label>
+            <input id="chat-input" type="text" maxlength="240" placeholder="Message the table" enterkeyhint="send" autocomplete="off">
+            <button class="btn btn-small" type="submit">Send</button>
+          </form>
+        </section>
+        <div class="rail-log" id="rail-log"></div>
+      </aside>
     </div>
   </div>
 
@@ -109,6 +121,9 @@
     <p id="notice-text"></p>
     <div class="notice-actions" id="notice-actions"></div>
   </main>
+
+  <!-- A new chat message shows here for a few seconds: at the top, clear of the cards. -->
+  <button class="chat-banner" id="chat-banner" type="button" aria-hidden="true" tabindex="-1" hidden></button>
 
   <!-- Flying cards, the swipe callout and confetti are drawn here, above everything. -->
   <div class="fx" id="fx" aria-hidden="true"></div>
@@ -168,6 +183,7 @@
       <p>You may play a higher card, but then you <strong>pick up the whole pile</strong> first and your cards start a new one.</p>
       <p>Cards from your hand and your face-up row can go down together if they match.</p>
       <p>If the host has set a <strong>turn clock</strong> and it runs out on you, you are skipped: nothing is played, and you draw 3 cards from the ones nobody was dealt. If you had nothing you could have played, you draw 3 or as many cards as are in the pile, whichever is more.</p>
+      <p>Not sure whether the pile is worth taking? <strong>Tap the pile</strong> to see what is in it: how many of each card, and what they add up to.</p>
       <h3>The swipe</h3>
       <p>The pile is swiped off the table, out of the game, when:</p>
       <ul>
@@ -180,9 +196,12 @@
       <p>A blind card can be played once the face-up card on top of it is gone. You don’t get to look first: tap it, confirm, and it is flipped for everyone to see. It has to be played right away. If you hold cards that match it, they can go with it. If it is too high, the pile is yours. A blind card that turns out to be a ten is played on the spot: swipe, and you go again.</p>
       <h3>Scoring</h3>
       <p>Aces are 1. Two to nine are face value. Jacks, queens and kings are 10. Tens are 20, so don’t get caught holding them.</p>
-      <p>Scores carry over from game to game. The match ends when someone reaches the points limit (100 unless the host changes it), and the lowest total wins. The first lead goes to the highest hand; after that, whoever went out leads the next game.</p>
+      <p>Scores carry over from game to game. The match ends when someone reaches the points limit (100 unless the host changes it), and the lowest total wins.</p>
+      <p><strong>Who goes first</strong> is decided by the cards, every game: whoever has the highest total in their hand and face-up row together leads. Tens count as nothing for this (they are worth plenty already), and a tie is settled by chance.</p>
+      <h3>Chat</h3>
+      <p>The <strong>Chat</strong> box sits just above the play by play. A new message also shows for a few seconds at the top of the screen, where it covers no cards; tap it to reply.</p>
       <h3>Notifications and the app</h3>
-      <p>Swipe can tell you when it’s your turn, even with your phone locked. Turn it on under <strong>Room settings</strong>. On an iPhone or iPad this only works once Swipe is on your Home Screen: tap Share, then <em>Add to Home Screen</em>, and open it from there. Do that from inside a room and your seat comes with you.</p>
+      <p>Swipe can tell you when it’s your turn, or when someone sends a chat message while you are away, even with your phone locked. Turn it on under <strong>Room settings</strong>. On an iPhone or iPad this only works once Swipe is on your Home Screen: tap Share, then <em>Add to Home Screen</em>, and open it from there. Do that from inside a room and your seat comes with you.</p>
       <p>To carry on in a different browser or on another device, ask for a <strong>seat code</strong> in Room settings and enter it there.</p>
       <h3>The cards</h3>
       <p>Two decks are shuffled together for up to 4 players, and one more for every two players after that. Everyone is dealt 20 cards; the rest sit the game out.</p>

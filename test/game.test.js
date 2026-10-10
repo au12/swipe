@@ -57,17 +57,49 @@ test('the deal: 20 cards each, 4 blind, 4 face-up, 12 in hand, half red and half
   assert.equal(deck.filter((c) => c.r === '10').length, 12);
 });
 
-test('the first lead goes to the highest hand; later games to whoever is named', () => {
-  for (let i = 0; i < 20; i++) {
-    const r = game.createRound({ players: ['a', 'b', 'c', 'd'] });
-    const total = (pid) => r.seats[pid].hand.reduce((sum, c) => sum + points(c.r), 0);
+test('leadTotal: hand and face-up cards at their scoring values, tens as nothing, blind cards left out', () => {
+  const seat = { hand: cards('K', 'Q', 'J', '9', '2', 'A', '10', '10'), up: cards('10', '7', 'K', '10'), blind: cards('K', 'K', '10', '9') };
+  assert.equal(game.leadTotal(seat), 10 + 10 + 10 + 9 + 2 + 1 + 0 + 0 + (0 + 7 + 10 + 0));
+  assert.equal(game.leadTotal({ hand: cards('10', '10', '10'), up: cards('10', '10', '10', '10'), blind: cards('K', 'K', 'K', 'K') }), 0, 'a fistful of tens counts for nothing');
+  assert.equal(game.leadTotal({ hand: cards('5'), up: [null, card('6'), null, null], blind: [] }), 11, 'gaps in the face-up row are fine');
+  // The tens are still worth 20 each to whoever is caught with them.
+  assert.deepEqual(['10', 'K'].map(points), [20, 10]);
+});
+
+test('every game is led by whoever has the highest hand-and-table total, tens not counted', () => {
+  for (let i = 0; i < 40; i++) {
+    const r = game.createRound({ players: ['a', 'b', 'c', 'd'], no: i + 1 });
+    const total = (pid) => [...r.seats[pid].hand, ...r.seats[pid].up].reduce((sum, c) => sum + (c.r === '10' ? 0 : points(c.r)), 0);
     const best = Math.max(...r.order.map(total));
     assert.equal(total(game.current(r)), best);
     assert.deepEqual(r.start, { pid: game.current(r), why: 'high', total: best });
+    assert.deepEqual(r.log[0], { k: 'start', by: game.current(r), why: 'high', total: best });
   }
-  const r = game.createRound({ players: ['a', 'b', 'c'], first: 'c' });
-  assert.equal(game.current(r), 'c');
-  assert.equal(r.start.why, 'winner');
+  // Nobody can be named to lead any more: last game's winner gets no head start.
+  for (let i = 0; i < 12; i++) {
+    const r = game.createRound({ players: ['a', 'b', 'c'], first: 'c' });
+    assert.equal(game.leadTotal(r.seats[game.current(r)]), Math.max(...r.order.map((pid) => game.leadTotal(r.seats[pid]))));
+    assert.equal(r.start.why, 'high');
+  }
+});
+
+test('tens can cost the lead, and a tie goes to chance among those tied', () => {
+  const seat = (hand, up = ['2', '2', '2', '2']) => ({ hand: cards(...hand), up: cards(...up), blind: cards('K', 'K', 'K', 'K') });
+  // Four tens and a nine would be 89 at scoring values. For the lead they are 9.
+  const seats = { a: seat(['10', '10', '10', '10', '9']), b: seat(['K', 'K', '3']), c: seat(['Q', '4']) };
+  assert.deepEqual(game.pickLead(['a', 'b', 'c'], seats), { pid: 'b', why: 'high', total: 23 + 8 });
+  // Face-up cards count, and face-up tens do not.
+  seats.c = seat(['Q', '4'], ['K', 'K', '10', '10']);
+  assert.deepEqual(game.pickLead(['a', 'b', 'c'], seats), { pid: 'c', why: 'high', total: 14 + 20 });
+
+  // b and c level: the pick is made among those two only, by the random source.
+  seats.b = seat(['K', 'K', '4', '2']);
+  seats.c = seat(['Q', '4'], ['K', 'K', '10', '10']);
+  assert.equal(game.leadTotal(seats.b), game.leadTotal(seats.c));
+  const asked = [];
+  const pick = (index) => game.pickLead(['a', 'b', 'c'], seats, (n) => (asked.push(n), index)).pid;
+  assert.deepEqual([pick(0), pick(1)], ['b', 'c']);
+  assert.deepEqual(asked, [2, 2], 'the choice is between the two who tied');
 });
 
 test('judge: equal or lower goes on, higher picks up, tens and fours swipe', () => {

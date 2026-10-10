@@ -2,9 +2,9 @@
    Type: Archivo (variable weight + width) for everything you read, pushed
    narrow and heavy for names and the big moments; Besley, a Clarendon, for
    anything printed on a card or counted in cards.
-   Colour: the room itself is a quiet, dark tabletop. The mat in the middle
-   takes the colour of whoever's turn it is, so the whole screen changes hands
-   when the turn does. The only fixed colours are the two deck backs. */
+   Color: the room itself is a quiet, dark tabletop. The mat in the middle
+   takes the color of whoever's turn it is, so the whole screen changes hands
+   when the turn does. The only fixed colors are the two deck backs. */
 
 @font-face {
   font-family: 'Archivo';
@@ -169,7 +169,7 @@ button:disabled { cursor: default; }
 .btn svg { width: 18px; height: 18px; flex: none; }
 .btn-primary { background: var(--ink); color: var(--table); box-shadow: 0 3px 0 color-mix(in srgb, var(--ink) 55%, var(--table)); }
 .btn-primary:hover:not(:disabled) { background: color-mix(in srgb, var(--ink) 88%, var(--table)); }
-/* A button in the viewer's own colour: the things only you can press. */
+/* A button in the viewer's own color: the things only you can press. */
 .btn-you {
   --c: var(--p, var(--me)); --on-c: var(--on-p, var(--on-me));
   background: var(--c); border-color: var(--c); color: var(--on-c);
@@ -178,7 +178,7 @@ button:disabled { cursor: default; }
 .btn-you:hover:not(:disabled) { background: color-mix(in srgb, var(--c) 88%, #fff); }
 .btn-you:active:not(:disabled) { translate: 0 2px; box-shadow: 0 1px 0 color-mix(in srgb, var(--c) 58%, #000); }
 .btn-you:disabled { opacity: 0.4; box-shadow: none; }
-/* Buttons that sit on the coloured mat. */
+/* Buttons that sit on the colored mat. */
 .btn-mat { border-color: rgba(255, 255, 255, 0.45); background: rgba(0, 0, 0, 0.2); color: inherit; }
 .btn-mat:hover:not(:disabled) { background: rgba(0, 0, 0, 0.36); border-color: rgba(255, 255, 255, 0.8); }
 .btn-danger { border-color: var(--suit-red); color: var(--suit-red); }
@@ -229,7 +229,7 @@ input:focus-visible, textarea:focus-visible, select:focus-visible { outline-offs
   min-height: 100dvh; max-width: 1120px; margin: 0 auto; padding: 40px 24px;
   display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 0.92fr); gap: 56px; align-items: center;
 }
-/* The wordmark leaves a trail in the two deck colours, as if it had just been swept sideways. */
+/* The wordmark leaves a trail in the two deck colors, as if it had just been swept sideways. */
 .wordmark {
   display: inline-block; padding: 0 0.16em 0 0.2em; margin-left: -0.08em;
   font-size: clamp(4.4rem, 15vw, 9.4rem); font-weight: 900; font-stretch: 62%;
@@ -357,7 +357,8 @@ input:focus-visible, textarea:focus-visible, select:focus-visible { outline-offs
 .zone-n { margin-left: 8px; padding: 0 8px; border-radius: 999px; background: color-mix(in srgb, var(--ink) 13%, transparent); font-family: var(--serif); font-variant-numeric: normal; font-weight: 800; font-size: 0.9rem; line-height: 1.5; }
 
 /* The pile. */
-.pilezone { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: clamp(8px, 3vw, 22px); }
+.pilezone { --pw: calc(var(--cw) * 1.16); display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: clamp(8px, 3vw, 22px); }
+.mat > .pilezone.is-peeking { z-index: 3; } /* its list may lie over the cards below while it is open */
 .pile {
   --pw: calc(var(--cw) * 1.16);
   position: relative; width: var(--pw); height: calc(var(--pw) * 1.4);
@@ -410,6 +411,54 @@ input:focus-visible, textarea:focus-visible, select:focus-visible { outline-offs
 .pile-burned { display: grid; justify-items: end; opacity: 0.86; }
 .pile-burned b { font-family: var(--serif); font-variant-numeric: normal; font-weight: 800; font-size: 1.15rem; line-height: 1.1; }
 .pile-burned span { font-size: 0.74rem; font-weight: 600; }
+
+/* Looking inside the pile. The pile is a button; this note beside it says so, and is one too. */
+#pile:has(.pile-card) { cursor: pointer; }
+#pile:focus-visible { outline-offset: calc(var(--pw) * 0.2); border-radius: calc(var(--pw) * 0.07); }
+.pile-hint {
+  display: inline-flex; align-items: center; gap: 7px; max-width: 11.5em; padding: 6px 9px; text-align: left;
+  border: 1.5px dashed rgba(255, 255, 255, 0.42); border-radius: 10px; background: rgba(0, 0, 0, 0.2); color: inherit;
+  font-size: 0.74rem; font-weight: 600; line-height: 1.22;
+}
+.pile-hint svg { width: 17px; height: 17px; flex: none; }
+.pile-hint:hover, .pilezone.is-peeking .pile-hint { background: rgba(0, 0, 0, 0.36); border-color: rgba(255, 255, 255, 0.8); }
+/* The list itself: a slip of card-colored paper to the left of the pile, pointing at it.
+   On a phone there is not much room there, so it reaches out to the edge of the mat. */
+.pile-peek {
+  /* --nudge: a long list is slid down (or up) just enough to stay on the mat; its pointer stays on the pile. */
+  position: absolute; z-index: 5; top: calc(50% + var(--nudge, 0px)); right: calc(50% + var(--pw) * 0.5 + 13px); translate: 0 -50%;
+  width: max-content; max-width: calc(50% - var(--pw) * 0.5 - 5px); display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; padding: 10px 11px 9px;
+  border-radius: 13px; background: #fffaf0; color: #1d1915; font-size: 15px;
+  box-shadow: 0 0 0 1.5px rgba(0, 0, 0, 0.22), 0 4px 0 rgba(0, 0, 0, 0.22), 0 16px 34px rgba(0, 0, 0, 0.5);
+  animation: peek-in 0.14s ease-out;
+}
+@keyframes peek-in { from { opacity: 0; translate: -8px -50%; } }
+.pile-peek::after {
+  content: ''; position: absolute; top: calc(50% - var(--nudge, 0px)); right: -6px; width: 13px; height: 13px; translate: 0 -50%; rotate: 45deg;
+  background: #fffaf0; box-shadow: 1.5px -1.5px 0 rgba(0, 0, 0, 0.22);
+}
+.peek-head { font-size: 1em; font-weight: 800; font-stretch: 82%; line-height: 1.1; white-space: nowrap; }
+.peek-list { display: grid; grid-template-columns: repeat(2, auto); justify-content: space-between; gap: 5px 12px; }
+.peek-list li { display: flex; align-items: center; gap: 0.36em; }
+.peek-card {
+  display: grid; place-items: center; width: 1.5em; height: 1.86em; flex: none; border-radius: 0.24em;
+  background: #fff; box-shadow: 0 0 0 1px #b9b0a0, 0 2px 0 #b9b0a0;
+  font-family: var(--serif); font-variant-numeric: normal; font-weight: 800; font-size: 1.08em; line-height: 1; color: #16161a;
+}
+.peek-n { font-weight: 800; font-size: 1.12em; line-height: 1; white-space: nowrap; min-width: 1.7em; }
+.peek-n i { font-style: normal; font-weight: 600; font-size: 0.8em; color: #6b6257; margin-right: 1px; }
+.peek-total { padding-top: 7px; border-top: 1.5px solid #e0d8c8; font-size: 0.86em; line-height: 1.25; color: #4d463e; }
+.peek-total span { white-space: nowrap; }
+.peek-total b { font-family: var(--serif); font-variant-numeric: normal; font-weight: 800; font-size: 1.16em; color: #1d1915; }
+@media (max-width: 760px) {
+  .pile-hint { flex-direction: column; align-items: flex-end; gap: 3px; text-align: right; padding: 6px 8px; max-width: 8.4em; }
+  .peek-list { row-gap: 4px; }
+}
+@media (min-width: 761px) {
+  .pile-peek { font-size: 17px; padding: 13px 15px 12px; gap: 10px; }
+  .peek-list { grid-template-columns: repeat(3, auto); gap: 7px 18px; }
+}
+.game.is-dealing .pile-peek { display: none; }
 
 /* ───────────── Turn order ───────────── */
 
@@ -562,8 +611,39 @@ button.pl:hover { background: color-mix(in srgb, var(--ink) 7%, transparent); }
 .home-back { margin-top: 26px; }
 .dialog-actions .link { margin-right: auto; font-size: 0.92rem; }
 
+/* Chat: who said what, oldest at the top, with the box to type in underneath. */
+.chat-list { display: grid; align-content: start; gap: 6px; height: clamp(120px, 24dvh, 230px); overflow-y: auto; font-size: 0.94rem; overscroll-behavior: contain; }
+.chat-list li { line-height: 1.3; padding-left: 10px; border-left: 3px solid var(--p, var(--line)); overflow-wrap: anywhere; }
+.chat-list li b { font-weight: 750; }
+.chat-list li b::after { content: ':'; }
+.chat-list li.is-me b { color: var(--muted); }
+.chat-list .chat-empty { color: var(--muted); border-left-color: transparent; padding-left: 0; }
+.chat-form { display: flex; gap: 8px; }
+.chat-form input { flex: 1 1 auto; min-width: 0; min-height: 38px; padding: 6px 11px; background: var(--table); }
+.chat-form .btn { min-height: 38px; }
+.rail-log { min-width: 0; }
+
+/* A new message, for a few seconds: under the top bar and never over a card (chat.js sets its place and height). */
+.chat-banner {
+  position: fixed; z-index: 60; left: 50%; top: 6px; translate: -50% 0;
+  width: min(520px, calc(100vw - 16px)); display: flex; align-items: center; gap: 10px; padding: 8px 14px 8px 9px; overflow: hidden;
+  border: 0; border-radius: 14px; background: var(--ink); color: var(--table); text-align: left;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45), 0 0 0 1.5px color-mix(in srgb, var(--table) 30%, transparent);
+}
+.chat-banner.is-in { animation: banner-in 0.22s cubic-bezier(0.2, 0.9, 0.3, 1.2); }
+@keyframes banner-in { from { translate: -50% -130%; opacity: 0; } }
+.chat-banner .avatar { flex: none; width: 30px; height: 30px; font-size: 0.74rem; }
+.chat-banner p { min-width: 0; font-size: 0.98rem; line-height: 1.25; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; }
+.chat-banner p b { font-weight: 800; }
+.chat-banner p b::after { content: ':'; }
+.chat-banner.is-tight { padding-top: 4px; padding-bottom: 4px; }
+.chat-banner.is-tight p { -webkit-line-clamp: 1; line-clamp: 1; }
+.chat-banner.is-tight .avatar { width: 24px; height: 24px; font-size: 0.64rem; }
+
 .log { display: grid; gap: 5px; max-height: 52dvh; overflow-y: auto; font-size: 0.92rem; overscroll-behavior: contain; }
 .log li { line-height: 1.3; padding-left: 10px; border-left: 3px solid var(--p, var(--line)); }
+/* A card's value in the play by play (and in the line under whose turn it is). */
+.rk { font-weight: 850; letter-spacing: 0.01em; }
 .log-swipe { font-weight: 750; }
 .log-pickup { color: var(--warn); }
 .log-skip { color: var(--suit-red); font-weight: 750; }

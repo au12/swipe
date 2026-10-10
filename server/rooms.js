@@ -22,8 +22,12 @@ const SEAT_LINK_MS = 12 * 3600_000; // and one tucked into a Home Screen link, w
 const SEAT_ALPHABET = 'ABCDEFGHJKMNPQRSTVWXYZ23456789'; // nothing that looks like something else
 const MAX_ALIASES = 8; // earlier names a renamed room still answers to
 const NAME_MIN = 3;
+const CHAT_KEEP = 100; // messages a room remembers
+const CHAT_MAX = 240; // characters in one message
+const CHAT_BURST = 6; // messages one person may send in ten seconds
+const CHAT_PUSH_GAP_MS = 8_000; // someone who is away is not buzzed more often than this
 
-// One accent colour per player. The first twelve are the easiest to tell
+// One accent color per player. The first twelve are the easiest to tell
 // apart, so small tables draw from those before the rest are used.
 export const COLORS = [
   '#e5484d', '#f76b15', '#ffb224', '#9bd12c', '#12a594', '#3b9eff', '#3e63dd', '#9a4fd0', '#ee5a8e', '#46a758', '#05a2c2', '#b8804f',
@@ -41,6 +45,16 @@ export const cleanSeatCode = (raw) =>
     .replace(/[^A-Z0-9]/g, '')
     .slice(0, 16);
 
+/** A chat message as typed, made safe to keep: one line, no control characters, not too long. */
+export function cleanChat(raw) {
+  return text(raw)
+    .replace(/[\u0000-\u001f\u007f\u2028\u2029]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, CHAT_MAX)
+    .trim();
+}
+
 export function cleanName(raw) {
   return text(raw)
     .replace(/[\u0000-\u001f\u007f<>]/g, '')
@@ -53,6 +67,13 @@ const defaultSettings = () => ({
   limit: 100, // a match ends when somebody's running score reaches this
   turnSeconds: 0, // 0 = no clock
 });
+
+/** How many cards of each rank: { K: 2, 7: 1 }. */
+const tally = (cards) => {
+  const counts = {};
+  for (const c of cards) counts[c.r] = (counts[c.r] ?? 0) + 1;
+  return counts;
+};
 
 export const live = (room) => Boolean(room.round && room.round.phase !== 'over');
 export const humansOnline = (room) => [...room.players.values()].some((p) => p.online && !p.bot);
@@ -87,6 +108,7 @@ export class Rooms {
       settings: defaultSettings(),
       players: new Map(),
       banned: [],
+      chat: [], // the last hundred things people said: { id, by, name, color, text, at }
       match: null, // a run of games played to the points limit
       round: null, // the game on the table right now
     };
@@ -305,6 +327,10 @@ export class Rooms {
     socket.ua = ua;
     if (ip) player.ip = ip;
     if (ua) player.ua = ua;
+    // What has been said so far, to this browser only. New messages follow one at a time.
+    try {
+      socket.send(JSON.stringify({ t: 'chat', all: room.chat ?? [] }));
+    } catch {}
     socket.visible = true;
     player.sockets.add(socket);
     player.online = true;
@@ -453,12 +479,51 @@ export class Rooms {
     return `${what} ${next}`.trim();
   }
 
+  // ───────────────────────── chat ─────────────────────────
+
+  /**
+   * Someone says something to the room. Everyone with the room open gets it at
+   * once; anyone who is not looking (and has notifications on) is sent a
+   * notification instead. Returns an error or null.
+   */
+  say(room, player, raw) {
+    const body = cleanChat(raw);
+    if (!body) return 'Type a message first.';
+    // A few at a time is talking; a stream of them is not.
+    const recent = (player.said ?? []).filter((at) => now() - at < 10_000);
+    if (recent.length >= CHAT_BURST) return 'That’s a lot of messages. Give it a few seconds.';
+    player.said = [...recent, now()];
+
+    room.chat ??= [];
+    room.chatSeq = (room.chatSeq ?? 0) + 1;
+    const message = { id: room.chatSeq, by: player.id, name: player.name, color: player.color, text: body, at: now() };
+    room.chat.push(message);
+    if (room.chat.length > CHAT_KEEP) room.chat.splice(0, room.chat.length - CHAT_KEEP);
+
+    const payload = JSON.stringify({ t: 'chat', m: message });
+    for (const p of room.players.values()) {
+      for (const socket of p.sockets) {
+        if (socket.readyState === 1) socket.send(payload);
+      }
+      if (p.id === player.id || p.bot || !p.push || this.watching(p)) continue;
+      if (now() - (p.chatPushedAt ?? 0) < CHAT_PUSH_GAP_MS) continue;
+      p.chatPushedAt = now();
+      // Its own tag and topic, so it never takes the place of a "your turn" that is still waiting.
+      this.notify(room, p, { kind: 'chat', title: `${player.name} in ${room.code}`, body }, { tag: `swipe-chat-${room.code}`, topic: 'chat' });
+    }
+    this.touch(room);
+    return null;
+  }
+
   /** Sends one notification and forgets the subscription if the browser has dropped it. */
-  notify(room, player, message) {
+  notify(room, player, message, { tag = `swipe-${room.code}`, topic: about = 'turn' } = {}) {
     const target = player.push;
     if (!config.push || !target) return;
-    const payload = { ...message, room: room.code, url: `r/${room.code}`, tag: `swipe-${room.code}` };
-    const topic = createHash('sha256').update(`${room.code}:${player.id}`).digest('base64url').slice(0, 24);
+    const payload = { ...message, room: room.code, url: `r/${room.code}`, tag };
+    const topic = createHash('sha256')
+      .update(about === 'turn' ? `${room.code}:${player.id}` : `${about}:${room.code}:${player.id}`)
+      .digest('base64url')
+      .slice(0, 24);
     Promise.resolve(this.sendPush(target, payload, { ttl: 600, topic, origin: player.origin ?? null }))
       .then((result) => {
         if (result !== 'gone' || player.push !== target) return;
@@ -554,11 +619,15 @@ export class Rooms {
         turnNo: r.turnNo,
         pending: r.pending,
         // The run on top is face up for everyone. The cards beneath it are
-        // sent as backs only: enough of them to draw the heap.
+        // sent as backs only: enough of them to draw the heap. Every card in
+        // the pile was played face up, so how many of each rank it holds is
+        // no secret, and anyone may ask (tap the pile). Their order and suits
+        // stay buried.
         pile: {
           count: r.pile.length,
           top: r.pile.slice(under),
           backs: r.pile.slice(Math.max(0, under - PILE_BACKS), under).map((c) => c.b),
+          ranks: tally(r.pile),
         },
         burned: r.burned,
         decks: r.decks,
@@ -795,10 +864,8 @@ export class Rooms {
     m.order = order;
     m.gameNo += 1;
     room.match = m;
-    // Whoever went out last time leads. The very first lead goes to the
-    // highest hand, which createRound works out when `first` is empty.
-    const first = m.lastWinner && order.includes(m.lastWinner) ? m.lastWinner : null;
-    room.round = game.createRound({ players: order, first, no: m.gameNo });
+    // Who leads is decided by the cards, every game: see game.leadTotal.
+    room.round = game.createRound({ players: order, no: m.gameNo });
     room.round.readyAt = now() + config.dealMs; // play opens when the shuffle-and-deal sequence is done
     return null;
   }
@@ -879,9 +946,12 @@ export class Rooms {
       // Notifications are between one player and the server: nobody else hears about them.
       case 'push':
         return this.setPush(room, me, msg.sub);
+      // Talk reaches everyone in the room, but it is not a move: nothing about the game changes.
+      case 'chat':
+        return this.say(room, me, msg.text);
       case 'pushTest':
         if (!me.push) return 'Turn notifications are off in this browser.';
-        this.notify(room, me, { kind: 'test', title: 'Notifications are on', body: 'You’ll get one of these when it’s your turn and you’re not looking.' });
+        this.notify(room, me, { kind: 'test', title: 'Notifications are on', body: 'You’ll get one of these when it’s your turn, or someone sends a message, and you’re not looking.' });
         return null;
 
       case 'sit': {
@@ -1014,7 +1084,7 @@ export class Rooms {
       return {
         ...rest,
         // (Addresses and browsers are for the admin page while someone is connected. They are not written to disk.)
-        players: [...players.values()].map(({ sockets, ip, ua, ...p }) => ({ ...p, online: Boolean(p.bot) })),
+        players: [...players.values()].map(({ sockets, ip, ua, said, chatPushedAt, ...p }) => ({ ...p, online: Boolean(p.bot) })),
       };
     });
   }
@@ -1054,6 +1124,7 @@ export class Rooms {
         ...saved,
         expiry: saved.expiry ?? null,
         aliases: (saved.aliases ?? []).filter((a) => typeof a === 'string' && a !== saved.code),
+        chat: Array.isArray(saved.chat) ? saved.chat.slice(-CHAT_KEEP) : [],
         settings: { ...defaultSettings(), ...saved.settings },
         players: new Map(saved.players.map((p) => [p.id, { ...p, online: Boolean(p.bot), sockets: new Set() }])),
       };

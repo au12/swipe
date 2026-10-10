@@ -1,8 +1,8 @@
 // One WebSocket per room, with automatic reconnect.
 
 export class Connection {
-  constructor({ room, token, name, claim = null, onState, onError, onFatal, onStatus, onJoin, onSeat, onClaim, onNote }) {
-    Object.assign(this, { room, token, name, claim, onState, onError, onFatal, onStatus, onJoin, onSeat, onClaim, onNote });
+  constructor({ room, token, name, claim = null, onState, onError, onFatal, onStatus, onJoin, onSeat, onClaim, onNote, onChat }) {
+    Object.assign(this, { room, token, name, claim, onState, onError, onFatal, onStatus, onJoin, onSeat, onClaim, onNote, onChat });
     this.ws = null;
     this.closed = false;
     this.attempt = 0;
@@ -71,6 +71,8 @@ export class Connection {
         this.onSeat?.(msg);
       } else if (msg.t === 'claim') {
         this.onClaim?.(msg.ok);
+      } else if (msg.t === 'chat') {
+        this.onChat?.(msg);
       } else if (msg.t === 'note') {
         this.onNote?.(msg.m); // a message from whoever runs the server
       }
@@ -85,8 +87,11 @@ export class Connection {
     ws.onerror = () => {};
   }
 
+  /** Sends a game action. Returns false if there was no open connection to send it on. */
   send(action, data = {}) {
-    if (this.ws?.readyState === 1) this.ws.send(JSON.stringify({ t: 'a', a: action, ...data }));
+    if (this.ws?.readyState !== 1) return false;
+    this.ws.send(JSON.stringify({ t: 'a', a: action, ...data }));
+    return true;
   }
 
   /** Sends something that is not a game action (visibility, a request for a seat code). */

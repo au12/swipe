@@ -146,6 +146,23 @@ const SOUNDS = {
     tone(ac, { freq: 880, start: 0.11, dur: 0.3, type: 'sine', gain: 0.11 });
   },
   join: (ac) => tone(ac, { freq: 520, to: 780, dur: 0.12, type: 'sine', gain: 0.08 }),
+  // A message arriving, in the manner of an old instant messenger: three
+  // quick bright notes climbing, the last one left to ring.
+  chatIn: (ac) => {
+    [
+      [988, 0, 0.09],
+      [1319, 0.085, 0.09],
+      [1976, 0.17, 0.42],
+    ].forEach(([freq, start, dur]) => {
+      tone(ac, { freq, start, dur, type: 'triangle', gain: 0.13, attack: 0.004 });
+      tone(ac, { freq: freq * 2, start, dur: dur * 0.6, type: 'sine', gain: 0.035, attack: 0.004 }); // a little glass on top
+    });
+  },
+  // Your own message leaving: the same idea, lower, shorter and quieter.
+  chatOut: (ac) => {
+    tone(ac, { freq: 784, dur: 0.07, type: 'triangle', gain: 0.07, attack: 0.004 });
+    tone(ac, { freq: 1175, start: 0.065, dur: 0.16, type: 'triangle', gain: 0.07, attack: 0.004 });
+  },
   tick: (ac) => tone(ac, { freq: 1000, dur: 0.04, type: 'square', gain: 0.04 }),
   error: (ac) => tone(ac, { freq: 140, dur: 0.16, type: 'square', gain: 0.05 }),
   win: (ac) => {

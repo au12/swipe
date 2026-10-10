@@ -45,10 +45,23 @@ export function buildDeck(decks, rnd = randomInt) {
 const handTotal = (cards) => cards.reduce((sum, c) => sum + points(c.r), 0);
 
 /**
- * Deals a round. `first` is the player who leads; leave it out and the lead
- * goes to whoever holds the highest total of card values in hand.
+ * What a player's cards count for when the lead is decided: the twelve in
+ * hand and the four face up on the table, at their scoring values, except
+ * that tens count nothing. Holding tens is advantage enough without the first
+ * turn as well. (Blind cards are left out: nobody knows what they are.)
  */
-export function createRound({ players, first = null, no = 1, rnd = randomInt }) {
+export const leadTotal = (seat) => [...seat.hand, ...seat.up.filter(Boolean)].reduce((sum, c) => sum + (c.r === TEN ? 0 : points(c.r)), 0);
+
+/** Who leads: the highest leadTotal. A tie is settled at random among those tied. */
+export function pickLead(players, seats, rnd = randomInt) {
+  const totals = players.map((pid) => leadTotal(seats[pid]));
+  const best = Math.max(...totals);
+  const tied = players.filter((_, i) => totals[i] === best);
+  return { pid: tied[rnd(tied.length)], why: 'high', total: best };
+}
+
+/** Deals a round. Who leads is decided by the cards (pickLead), in every game of a match. */
+export function createRound({ players, no = 1, rnd = randomInt }) {
   if (players.length < 2) throw new Error('Swipe needs at least two players');
   if (players.length > MAX_PLAYERS) throw new Error('Too many players');
 
@@ -63,15 +76,7 @@ export function createRound({ players, first = null, no = 1, rnd = randomInt }) 
     };
   }
 
-  let start;
-  if (first && players.includes(first)) {
-    start = { pid: first, why: 'winner', total: null };
-  } else {
-    const totals = players.map((pid) => handTotal(seats[pid].hand));
-    const best = Math.max(...totals);
-    const tied = players.filter((_, i) => totals[i] === best);
-    start = { pid: tied[rnd(tied.length)], why: 'high', total: best };
-  }
+  const start = pickLead(players, seats, rnd);
 
   return {
     id: randomUUID().slice(0, 8),
@@ -331,7 +336,7 @@ export function skip(r, pid, { rnd = randomInt } = {}) {
   const cards = draw(r, forced ? Math.max(SKIP_PENALTY, r.pile.length) : SKIP_PENALTY, rnd);
   r.seats[pid].hand.push(...cards);
   note(r, { k: 'skip', by: pid, drew: cards.length, forced });
-  // Everyone sees how many were drawn and the colour of their backs. Only the player sees what they are.
+  // Everyone sees how many were drawn and the color of their backs. Only the player sees what they are.
   emit(r, { kind: 'skip', by: pid, drew: cards.length, forced, backs: cards.map((c) => c.b) });
   advance(r);
   return ok({ drew: cards.length, forced });

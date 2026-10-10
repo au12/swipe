@@ -16,19 +16,21 @@ Swipe is built on the same server as [Tradecraft](https://github.com/au12/tradec
 
 - The server runs the rules: sets of one to four equal cards, equal-or-lower on the pile, picking up when you play higher, tens, four of a kind (laid at once or built up across turns), blind cards, going out, scoring.
 - Two decks for up to 4 players and one more for every two players after that, mixed together, half red-backed and half blue.
-- A match runs over as many games as it takes for someone to reach the points limit (100 unless the host changes it). The first lead goes to the highest hand; after that, whoever went out leads.
+- A match runs over as many games as it takes for someone to reach the points limit (100 unless the host changes it). Every game is led by whoever was dealt the highest cards.
 - Tap cards to build a set from your hand and your face-up row together. The button tells you what the set will do before you commit: go on the pile, swipe it, or cost you a pickup.
 - Blind cards ask for confirmation, then flip for the whole table to see.
 - Computer players, for filling a table or trying the game on your own.
 - An optional turn clock. When it runs out that player is skipped, with a banner nobody can miss, and draws penalty cards. The host can pause it or add 30 seconds.
 - Turn notifications: a push when it is your turn and you are not looking, even with the phone locked. See [Notifications and installing](#notifications-and-installing).
-- A play-by-play log and a running scoreboard.
+- A play-by-play log, newest move first, and a running scoreboard.
+- Chat for the room, just above the log. A new message also shows for a few seconds in a banner at the top of the screen, placed so it never covers a card, with a sound in the manner of an old instant messenger. Anyone who is away and has notifications on gets it as a notification.
+- Tap the pile to see what is in it: how many of each rank you would be picking up, and what they add up to.
 
 **The room**
 
 - No accounts. A room is a link like `/r/lucky-riffle-42`.
 - The first person in is the host: deal, add computer players, play a turn for someone who has wandered off, sit people out, remove them, hand over hosting, lock the room, change the points limit.
-- Everyone gets a colour of their own. The mat in the middle of the screen takes the colour of whoever's turn it is.
+- Everyone gets a color of their own. The mat in the middle of the screen takes the color of whoever's turn it is.
 - Players who drop reconnect into their seat with their hand. If the host disappears, hosting passes to someone else.
 - People who arrive mid-match watch, and can ask to be dealt in from the next game. They start on the table's average score.
 - A seat code moves your seat, cards and score to another browser or device.
@@ -56,7 +58,8 @@ The rule sheet leaves a few things open. These are the calls the game makes; eac
 - **Face-up table cards can be played at any time**, on their own or together with matching cards from your hand. A blind card becomes playable as soon as the face-up card on top of it is gone, whether or not you still hold cards.
 - **Tens go down one at a time.** Each one swipes and earns another turn, so a second ten can follow on that turn. A blind card that turns out to be a ten is played automatically.
 - **Going out counts even if the last card is a swipe.** A last card that is too high does not go out: the pile comes home first.
-- **Ties for the first lead** are settled at random among the tied hands. Hand totals use the scoring values (tens count 20).
+- **Who leads** is decided by the cards in every game, not by who went out last. Each player's twelve hand cards and four face-up cards are added up at their scoring values, except that tens count as nothing (a hand full of tens is advantage enough), and the highest total leads. Blind cards are not counted. Ties are settled at random among those tied. The sum is `leadTotal` in [`server/game.js`](server/game.js). Tens are still 20 each against whoever is left holding them.
+- **What is in the pile is public.** Every card in it was played face up, so anyone may see how many of each rank it holds. Their order and suits stay buried.
 - **The match ends when someone reaches the limit** (100 is enough; it does not have to be passed). Ties for the lowest score share the win.
 - **Leaving mid-game** takes your cards out of play. Your score is kept in case you come back.
 - **A skipped turn costs cards.** When the clock runs out, nothing is played and the pile stays put, but the player draws 3 cards from the stock (the cards nobody was dealt). If they had nothing they could have played (no card that fits, no ten, no four of a kind) they draw 3 or as many cards as the pile holds, whichever is more, so sitting out the clock is never better than picking up. An unflipped blind card does not count as something to play. If the stock runs out, the swiped cards are shuffled back into it. The number is `SKIP_PENALTY` in [`server/game.js`](server/game.js). A blind card that has already been flipped is the exception to all of this: it is committed, so it is played.
@@ -123,7 +126,7 @@ A sample systemd unit is in [`deploy/swipe.service`](deploy/swipe.service).
 
 ## Notifications and installing
 
-Swipe can be installed like an app, and can send a notification when it is your turn. Players turn it on with **Notify me on my turn** in the lobby or under **Room settings**; it then follows them from room to room on that device without asking again.
+Swipe can be installed like an app, and can send a notification when it is your turn or when someone sends a chat message while you are away. Players turn it on with **Notify me on my turn** in the lobby or under **Room settings**; it then follows them from room to room on that device without asking again.
 
 **What the server needs**
 
@@ -141,6 +144,7 @@ Android, and desktop Chrome, Edge and Firefox, need none of that: notifications 
 
 - The turn passes to you and the game is not in front of you (page hidden, phone locked, tab closed). Extra turns after a swipe are not announced again.
 - You look away during your own turn without playing: one reminder, after 20 seconds.
+- Someone sends a chat message and the game is not in front of you. A run of messages buzzes you once, not once each (at most one every 8 seconds); the rest are waiting in the room. Chat notifications are separate from "your turn" ones, so neither replaces the other.
 - Never while you are looking at the game, and never to computer players.
 
 Messages are encrypted for the one browser they are meant for (RFC 8291) and signed with the server's key (VAPID, RFC 8292). The push service that relays them cannot read them. An undelivered notification is dropped after ten minutes, and a newer one replaces an older one for the same room.
@@ -174,6 +178,7 @@ How it is protected:
 - A sign-in is a random token in a cookie that scripts cannot read and other sites cannot send (`HttpOnly`, `SameSite=Strict`, and `Secure` when you arrive over HTTPS). It lasts `ADMIN_SESSION_HOURS` and is held in memory, so restarting the server signs you out.
 - Nothing is changed for a request that another website could make your browser send.
 - Addresses and browsers are kept in memory while someone is connected. They are never written to `rooms.json` or to the backup.
+- A room's last hundred chat messages are saved with it in `rooms.json`, so they survive a restart and are in the backup. They go when the room does.
 - Use a different password from `CREATE_PASSWORD`, and reach the page over HTTPS.
 
 ### Keeping it to your own network
@@ -267,6 +272,7 @@ public/       the client: plain HTML, CSS and ES modules, served as-is
   js/fx.js      motion: flights, the wash, the swipe, confetti
   js/sound.js   sound effects, synthesised with Web Audio
   js/push.js    notifications from the browser's side: permission, subscribing
+  js/chat.js    the chat panel and the banner a new message shows in
   js/app.js     the connection, taps, dialogs, and the order things animate in
   sw.js         the service worker: shows notifications, makes the app installable
   admin/        the admin page: one HTML file, one script, one stylesheet

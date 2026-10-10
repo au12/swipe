@@ -8,6 +8,7 @@ import { backHTML, faceHTML, flipHTML } from './cards.js';
 import { TEN, judge } from './rules.js';
 import * as fx from './fx.js';
 import * as push from './push.js';
+import * as chat from './chat.js';
 import {
   colorOf,
   fitHand,
@@ -27,6 +28,7 @@ import {
   renderHand,
   renderLobby,
   renderPile,
+  showPeek,
   renderRails,
   renderResults,
   renderStrip,
@@ -51,7 +53,7 @@ const ui = {
   tableView: 'turn', // whose table cards: the player on turn, or 'me'
   handView: 'turn',
   selected: new Set(),
-  pile: { count: 0, top: [], backs: [] }, // the pile as drawn (it lags the server while cards are in the air)
+  pile: { count: 0, top: [], backs: [], ranks: {} }, // the pile as drawn (it lags the server while cards are in the air)
   mat: null,
   sending: false,
   blindSlot: null,
@@ -114,6 +116,13 @@ function sizeCards() {
 function boot() {
   hydrateIcons();
   bindGlobal();
+  chat.init({
+    send: (text) => {
+      if (conn?.send('chat', { text }) !== false) return true;
+      toast('Not connected just now. Your message is still there: send it again in a moment.', { error: true });
+      return false;
+    },
+  });
   sizeCards();
   push.init(cfg.pushKey).then(() => {
     ui.push = push.support();
@@ -159,7 +168,7 @@ async function homeTable() {
   const pileEl = $('.home-pile', host);
   const wipe = $('.home-wipe', host);
   const word = $('.home-word', host);
-  let colour = 0;
+  let color = 0;
   mat.style.setProperty('--mat', matColor(COLORS[0]));
   let id = 0;
 
@@ -200,9 +209,9 @@ async function homeTable() {
     }
     await sleep(650);
     if ($('#home').hidden) return;
-    // The swipe: cards go one way, the next colour comes in behind them.
-    colour = (colour + 1) % COLORS.length;
-    const next = matColor(COLORS[colour]);
+    // The swipe: cards go one way, the next color comes in behind them.
+    color = (color + 1) % COLORS.length;
+    const next = matColor(COLORS[color]);
     wipe.style.background = next;
     word.animate(
       [
@@ -325,6 +334,18 @@ function followRename(code) {
   if (push.isIOS() && !push.standalone()) carrySeat();
 }
 
+const emptyPile = () => ({ count: 0, top: [], backs: [], ranks: {} });
+
+/** Shows or hides the list of what is in the pile. Nothing to show when the pile is empty. */
+function togglePeek(open = $('#pile-peek').hidden) {
+  const peek = $('#pile-peek');
+  const show = Boolean(open) && ui.pile.count > 0;
+  if (show) showPeek(ui.pile);
+  else peek.hidden = true;
+  $('#pile').setAttribute('aria-expanded', String(show));
+  $('#pilezone').classList.toggle('is-peeking', show);
+}
+
 const homeLink = () => `<a class="btn" href="${esc(api('.'))}">Go to the home page</a>`;
 
 function roomMissing() {
@@ -337,6 +358,7 @@ function roomMissing() {
 
 function connect(code, name, claim = null) {
   conn?.close();
+  chat.reset();
   conn = new Connection({
     room: code,
     token: token(),
@@ -357,6 +379,7 @@ function connect(code, name, claim = null) {
     },
     onStatus: (up) => ($('#conn-banner').hidden = up),
     // A message from whoever runs the server: long enough on screen to read twice.
+    onChat: (msg) => chat.receive(msg),
     onNote: (message) => {
       sfx('join');
       toast(String(message), { hold: Math.min(15000, 6000 + String(message).length * 45) });
@@ -439,6 +462,7 @@ function commit(next, { dealing = false } = {}) {
   if (!store.get('name')) store.set('name', me.name);
   if (store.get('room') !== next.code) store.set('room', next.code);
   followRename(next.code);
+  chat.setYou(me.id);
 
   const r = next.round;
   // Keep only selections that are still playable; a flipped blind card is always in.
@@ -450,7 +474,7 @@ function commit(next, { dealing = false } = {}) {
     for (const c of myOpenCards(next, me)) if (ui.selected.has(c.id) && c.r !== rank) ui.selected.delete(c.id);
     ui.selected.add(flipped.id);
   }
-  ui.pile = r ? { count: r.pile.count, top: r.pile.top, backs: r.pile.backs ?? [] } : { count: 0, top: [], backs: [] };
+  ui.pile = r ? { count: r.pile.count, top: r.pile.top, backs: r.pile.backs ?? [], ranks: r.pile.ranks ?? {} } : emptyPile();
 
   renderAll({ dealing, turnChanged: prev?.round?.turn !== r?.turn || prev?.round?.id !== r?.id });
 }
@@ -507,7 +531,7 @@ function renderSelection() {
   renderActions(state, me, ui);
 }
 
-/** The mat takes the colour of whoever's turn it is. A new turn wipes the new colour across. */
+/** The mat takes the color of whoever's turn it is. A new turn wipes the new color across. */
 function setMat(hex, animate) {
   const mat = $('#mat');
   const color = matColor(hex);
@@ -601,7 +625,7 @@ async function showPlay(prev, next, ev) {
     fx.floatLabel(`+${ev.pickup}`, to, color);
     $('#pile').classList.add('is-clearing'); // the shadow goes with the cards
     await fx.gatherTo($$('#pile .pile-card'), to);
-    ui.pile = { count: 0, top: [], backs: [] };
+    ui.pile = emptyPile();
     renderPile(prev, ui.pile);
   }
 
@@ -613,6 +637,7 @@ async function showPlay(prev, next, ev) {
     count: before.count + ev.cards.length,
     top: joins ? [...before.top, ...ev.cards] : ev.cards,
     backs: joins ? before.backs : [...before.backs, ...before.top.map((c) => c.b)],
+    ranks: { ...before.ranks, [ev.cards[0].r]: (before.ranks?.[ev.cards[0].r] ?? 0) + ev.cards.length },
   };
   const spec = pileSpec(r0.id, after.count, after.top, after.backs);
   const anchor = fx.rectOf($('#pile'));
@@ -649,7 +674,7 @@ async function showPlay(prev, next, ev) {
     $('#pile').classList.add('is-clearing');
     await fx.sweepOff($$('#pile .pile-card'), 1); // the same way the band is travelling
     $('#pile').classList.remove('is-hot');
-    ui.pile = { count: 0, top: [], backs: [] };
+    ui.pile = emptyPile();
     renderPile(prev, ui.pile);
     await sleep(reducedMotion() ? 0 : 260);
   } else {
@@ -908,19 +933,19 @@ function renderSettings() {
 /** The "Turn notifications" row: what it offers depends on the browser and on what is already on. */
 function notifyRow() {
   if (ui.push === 'off') return '';
-  const row = (hint, control) => `<div class="set-row"><div><label>Turn notifications</label><small>${hint}</small></div>${control}</div>`;
+  const row = (hint, control) => `<div class="set-row"><div><label>Notifications</label><small>${hint}</small></div>${control}</div>`;
   if (ui.push === 'install') {
     return row('On an iPhone or iPad these need Swipe on your Home Screen. Tap the Share button, then <b>Add to Home Screen</b>, and open Swipe from there. Your seat comes with you.', '');
   }
   if (ui.push === 'none') return row('This browser can’t show notifications.', '');
   if (state.notify && push.wanted()) {
     return row(
-      'On. You’ll hear when it’s your turn and you’re not looking, even with this device locked.',
+      'On. You’ll hear when it’s your turn, or when someone sends a message, and you’re not looking, even with this device locked.',
       `<div class="set-actions set-actions-end"><button type="button" class="btn btn-small" data-act="push-test">Send a test</button><button type="button" class="btn btn-small" data-act="push-off">Turn off</button></div>`,
     );
   }
   if (push.blocked()) return row('Blocked for this site. Allow notifications in your browser’s settings, then come back here.', '');
-  return row('Hear when it’s your turn, even with this device locked.', '<button type="button" class="btn btn-small btn-you" data-act="push-on">Turn on</button>');
+  return row('Hear when it’s your turn or someone sends a message, even with this device locked.', '<button type="button" class="btn btn-small btn-you" data-act="push-on">Turn on</button>');
 }
 
 // ───────────────────────── notifications and seats ─────────────────────────
@@ -936,6 +961,7 @@ function joined() {
   // Notifications turned on in this browser follow you from room to room without asking again.
   push.resume().then((sub) => sub && send('push', { sub }));
   push.clearShown(`swipe-${state?.code ?? currentRoomCode()}`);
+  push.clearShown(`swipe-chat-${state?.code ?? currentRoomCode()}`);
   // In a Safari tab on an iPhone, keep a seat code tucked into the "Add to
   // Home Screen" link, so the installed app opens in this room as you.
   if (push.isIOS() && !push.standalone()) carrySeat();
@@ -1062,6 +1088,8 @@ function bindGlobal() {
     }
     const playerId = $('#dlg-player').dataset.id;
     switch (el.dataset.act) {
+      case 'peek':
+        return togglePeek();
       case 'rules':
         return $('#dlg-rules').showModal();
       case 'sound':
@@ -1194,7 +1222,22 @@ function bindGlobal() {
     if (!$('#dlg-name').dataset.rename) event.preventDefault();
   });
 
+  // The list of what is in the pile goes away as soon as anything else is touched.
+  document.addEventListener(
+    'pointerdown',
+    (event) => {
+      if (!$('#pile-peek').hidden && !event.target.closest?.('#pile, .pile-hint')) togglePeek(false);
+    },
+    true,
+  );
+
   document.addEventListener('keydown', (event) => {
+    // The pile is a button: Enter or Space on it opens the list, Escape puts it away.
+    if (event.target?.id === 'pile' && (event.key === 'Enter' || event.key === ' ')) {
+      event.preventDefault();
+      return togglePeek();
+    }
+    if (event.key === 'Escape' && !$('#pile-peek').hidden) return togglePeek(false);
     if (!state || document.querySelector('dialog[open]') || !myTurn(state, me)) return;
     if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) return;
     if (event.key === 'Enter' && ui.selected.size && !(event.target instanceof HTMLButtonElement)) playSelected();
@@ -1209,6 +1252,7 @@ function bindGlobal() {
   let resizeTimer = null;
   window.addEventListener('resize', () => {
     clearTimeout(resizeTimer);
+    if (!$('#pile-peek').hidden) togglePeek(false); // it was placed for the old size
     resizeTimer = setTimeout(() => {
       sizeCards();
       fitHand();
@@ -1217,7 +1261,10 @@ function bindGlobal() {
   document.addEventListener('visibilitychange', updateTitle);
   // Back in front of the game: its notification has done its job.
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible' && state) push.clearShown(`swipe-${state.code}`);
+    if (document.visibilityState === 'visible' && state) {
+      push.clearShown(`swipe-${state.code}`);
+      push.clearShown(`swipe-chat-${state.code}`);
+    }
   });
   window.addEventListener('swipe:installable', () => state && refreshPushUi());
 }

@@ -5,7 +5,7 @@ import { $, $$, esc, icon, initials, onColor, plural, store, toast } from '../js
 
 const REFRESH_MS = 3000;
 const api = (path) => new URL(`admin/api/${path}`, document.baseURI);
-/** A colour the server sent, only if it is one: it goes into a style attribute. */
+/** A color the server sent, only if it is one: it goes into a style attribute. */
 const hex = (c) => (/^#[0-9a-f]{6}$/i.test(c) ? c : '#888888');
 const roomLink = (code) => new URL(`r/${encodeURIComponent(code)}`, document.baseURI).toString();
 

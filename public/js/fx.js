@@ -146,7 +146,7 @@ export function floatLabel(text, at, color) {
 }
 
 /**
- * The big moment: a band in the player's colour tears across the screen
+ * The big moment: a band in the player's color tears across the screen
  * with the word on it, then follows the pile off the table.
  */
 export function callout(text, { color, on = '#fff', sub = '', hold = 620 } = {}) {
@@ -237,7 +237,7 @@ export function skipped({ sub = '', penalty = '', shake = null } = {}) {
 }
 
 const SUIT_GLYPHS = ['♠', '♥', '♦', '♣'];
-/** Suits raining down in the given colours. */
+/** Suits raining down in the given colors. */
 export function confetti(colors, { count = 70 } = {}) {
   if (reducedMotion()) return;
   const host = layer();
