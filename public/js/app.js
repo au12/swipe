@@ -106,8 +106,8 @@ function sizeCards() {
   const w = Math.min(stage?.clientWidth || window.innerWidth, window.innerWidth);
   // Top to bottom the table is about 5.5 cards tall (table cards, pile, one
   // row of hand) plus everything that isn't a card: bars, labels, buttons.
-  const strip = $('#strip');
-  const chrome = strip && getComputedStyle(strip).display === 'none' ? 396 : 402;
+  // (More of it on a wide screen, where the bars and gaps are roomier.)
+  const chrome = window.innerWidth > 1120 ? 452 : 402;
   const byHeight = (window.innerHeight - chrome) / 5.5;
   const cw = Math.max(44, Math.min(w * 0.158, byHeight, 94));
   document.documentElement.style.setProperty('--cw', `${cw.toFixed(1)}px`);

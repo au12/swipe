@@ -591,14 +591,12 @@ button.seat:hover { border-color: rgba(255, 255, 255, 0.75); }
   display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 4px 9px; width: 100%;
   padding: 6px 8px; border: 1.5px solid transparent; border-radius: 10px; background: transparent; color: var(--ink); text-align: left;
 }
-.pls.has-cards .pl { grid-template-columns: auto minmax(0, 1fr) auto 2.6ch; }
 button.pl:hover { background: color-mix(in srgb, var(--ink) 7%, transparent); }
 .pl.is-turn { border-color: var(--p); background: color-mix(in srgb, var(--p) 16%, transparent); }
 .pl-name { display: flex; align-items: baseline; gap: 5px; min-width: 0; font-weight: 650; line-height: 1.2; }
 .pl-name > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pl-name small { font-weight: 400; color: var(--muted); font-size: 0.8rem; white-space: nowrap; }
 .pl-name svg { width: 14px; height: 14px; flex: none; align-self: center; }
-.pl-cards { font-family: var(--serif); font-variant-numeric: normal; font-weight: 700; font-size: 0.9rem; padding: 1px 6px; border-radius: 4px; background: var(--card); color: #16161a; box-shadow: 0 1.5px 0 var(--card-edge); }
 .pl-score { font-family: var(--serif); font-variant-numeric: normal; font-weight: 800; font-size: 1.05rem; text-align: right; }
 .pl .score-bar { height: 4px; background: color-mix(in srgb, var(--ink) 12%, transparent); }
 .watchers { display: flex; flex-wrap: wrap; gap: 5px 6px; align-items: center; }
@@ -757,9 +755,6 @@ button.pl:hover { background: color-mix(in srgb, var(--ink) 7%, transparent); }
 
 /* ───────────── Smaller screens ───────────── */
 
-@media (min-width: 1121px) {
-  .strip { display: none; } /* the scores rail already shows the order */
-}
 @media (max-width: 1120px) {
   .layout { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); max-width: 680px; gap: 14px; }
   .stage { grid-column: 1 / -1; order: -1; }

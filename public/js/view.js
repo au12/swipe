@@ -761,12 +761,10 @@ function scorePanel(state, me) {
     .filter(Boolean)
     .map((p) => {
       const score = m?.scores[p.id] ?? 0;
-      const left = r && r.phase !== 'over' ? r.seats[p.id]?.left : null;
       const turn = r?.phase === 'play' && r.turn === p.id;
       const tagList = [p.id === me.id ? 'you' : '', p.bot ? 'computer' : '', p.online ? '' : 'offline'].filter(Boolean).join(', ');
       const inner = `${avatar(p)}
           <span class="pl-name">${p.id === state.hostId ? icon('crown') : ''}<span>${esc(p.name)}</span>${tagList ? `<small>${tagList}</small>` : ''}</span>
-          ${left != null ? `<span class="pl-cards" title="Cards left">${left}</span>` : ''}
           <b class="pl-score" title="Points so far">${score}</b>
           <span class="score-bar"><i style="width:${Math.min(100, (score / limit) * 100)}%"></i></span>`;
       const cls = `pl${turn ? ' is-turn' : ''}`;
@@ -794,8 +792,7 @@ function scorePanel(state, me) {
         : '<button type="button" class="btn btn-small" data-act="sit">Deal me in next game</button>';
   return `<section class="side">
       <div class="side-row"><h2>Scores</h2><span class="side-meta">${m ? `Game ${m.gameNo}, to ${limit}` : `To ${limit}`}</span></div>
-      <ol class="pls${r && r.phase !== 'over' ? ' has-cards' : ''}">${rows || '<li class="side-meta">Nobody is seated yet.</li>'}</ol>
-      ${r && r.phase !== 'over' ? '<p class="side-meta side-key">Cards left, then points so far.</p>' : ''}
+      <ol class="pls">${rows || '<li class="side-meta">Nobody is seated yet.</li>'}</ol>
       ${watchers.length ? `<div class="watchers"><span class="side-meta">Watching</span>${watchList}</div>` : ''}
       ${seatBtn}
     </section>`;
