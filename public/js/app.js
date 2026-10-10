@@ -198,7 +198,7 @@ async function homeTable() {
       cards.push(card);
       draw(cards);
       // The newest card drops in from one side, and its shadow with it.
-      fx.dropOn(pileEl.lastElementChild, $$('.pile-cast .pile-shade', pileEl).at(-1), id % 2 ? 1 : -1);
+      fx.dropOn(pileEl.lastElementChild, $$('.pile-cast .pile-shade', pileEl).at(-1), id % 2 ? 1 : -1, cards.length === 1 ? $('.pile-shade.is-pool', pileEl) : null);
     }
     await sleep(650);
     if ($('#home').hidden) return;

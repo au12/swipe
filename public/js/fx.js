@@ -232,10 +232,13 @@ export function gatherTo(cards, to, shades = []) {
 /**
  * A card dropped onto the pile from the side, as on the home page: it comes
  * in high and turning, and its shadow comes in from further off, wide and
- * faint, and tightens under it as it lands.
+ * faint, and tightens under it as it lands. `pool` is the pile's pool of shade,
+ * passed when this is the first card down.
  */
-export function dropOn(card, shade, side = 1) {
+export function dropOn(card, shade, side = 1, pool = null) {
   const opts = { duration: 380 * speed(), easing: EASE_OUT };
+  // The shade a card gathers round its foot is only there once the card is: for the first card onto a bare mat it comes up as the card touches down.
+  pool?.animate([{ opacity: 0 }, { opacity: 0, offset: 0.45 }, { opacity: 1 }], opts);
   const h = card.offsetWidth * 0.9; // how high it starts
   const fall = card.offsetHeight * 1.5;
   shade?.animate(
