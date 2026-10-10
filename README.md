@@ -176,6 +176,25 @@ How it is protected:
 - Addresses and browsers are kept in memory while someone is connected. They are never written to `rooms.json` or to the backup.
 - Use a different password from `CREATE_PASSWORD`, and reach the page over HTTPS.
 
+### Keeping it to your own network
+
+The password is the lock; the proxy can also refuse to show the door to anyone outside your network. In Nginx Proxy Manager, edit the proxy host, open **Advanced**, and paste this into **Custom Nginx Configuration** with your own network in place of `10.0.10.0/24`:
+
+```nginx
+location ^~ /admin {
+    allow 10.0.10.0/24;
+    deny all;
+    include conf.d/include/proxy.conf;
+}
+```
+
+For plain nginx the block is the same with your own `proxy_pass` and headers in place of the `include` line; there is a copy in [`deploy/nginx.conf`](deploy/nginx.conf).
+
+- `^~` matters: without it, Nginx Proxy Manager's asset-caching rule would answer for `/admin/admin.js` and `/admin/admin.css` instead of this block.
+- The rule sees the address the proxy sees. If you open the site by its public name from inside your network and get a 403, your router is sending you out and back in, so you arrive with your public address. Point the name at the proxy on your local DNS, or open the app by its LAN address, and the rule sees who you really are.
+- With Cloudflare's proxy in front, every visitor arrives from Cloudflare and this rule shuts everyone out, you included.
+- The server reads a request's path the way nginx does, so there is no spelling of `/admin` that gets past the rule and still opens the page.
+
 ## Configuration
 
 Everything is an environment variable. All are optional.

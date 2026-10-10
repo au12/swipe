@@ -192,11 +192,22 @@ function serveStatic(req, res, urlPath) {
   });
 }
 
-/** Strips the configured base path; works whether or not the proxy strips it first. */
+/**
+ * The path a request is for, with the configured base path stripped (it works
+ * whether or not the proxy strips it first).
+ *
+ * It is read the way nginx reads one, so that a rule in a proxy ("only my LAN
+ * may open /admin") and this server always agree about what is being asked
+ * for. A target has to be a plain path: "//host/admin" is not a path, and a
+ * backslash is not a slash. "." and ".." are resolved and doubled slashes are
+ * merged, as nginx does before it matches a location.
+ */
 function localPath(rawUrl) {
+  const raw = text(rawUrl).split('?')[0];
+  if (!raw.startsWith('/') || /[\\#\u0000- \u007f]/.test(raw)) return null;
   let pathname;
   try {
-    pathname = new URL(rawUrl, 'http://x').pathname;
+    pathname = new URL(`http://x${raw.replace(/\/{2,}/g, '/')}`).pathname.replace(/\/{2,}/g, '/');
   } catch {
     return null;
   }

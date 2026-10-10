@@ -568,3 +568,43 @@ test('IPv6 addresses in one /64 share a count; an address that is not one is not
   assert.deepEqual((await roomIn(code)).players[0].ips, ['127.0.0.1']);
   odd.ws.close();
 });
+
+// ───────────────────────── one meaning per address ─────────────────────────
+
+test('only a plain /admin path is the admin page, so a proxy rule on /admin cannot be sidestepped', async () => {
+  const http = await import('node:http');
+  // Sent exactly as written: no client-side tidying of the path.
+  const get = (path) =>
+    new Promise((resolve, reject) => {
+      const req = http.request({ host: '127.0.0.1', port: PORT, path, method: 'GET' }, (res) => {
+        let body = '';
+        res.on('data', (chunk) => (body += chunk));
+        res.on('end', () => resolve({ status: res.statusCode, body }));
+      });
+      req.on('error', reject);
+      req.end();
+    });
+  const isAdmin = (r) => r.status === 200 && /login-form|"enabled"/.test(r.body);
+
+  // What nginx also reads as /admin (it resolves dots and merges slashes before matching), this server serves…
+  for (const path of ['/admin', '/admin/', '/admin?x=1', '/./admin', '/x/../admin', '/x/%2e%2e/admin', '//admin', '/admin//api/session', '/admin/api/session']) {
+    assert.ok(isAdmin(await get(path)), `${path} is the admin page`);
+  }
+  // …and nothing else is. Each of these would slip past a "location /admin" rule.
+  for (const path of ['//x/admin', '//x/admin/api/session', '//x/admin/api/state', '/x\\..\\admin', '\\admin', '/\\admin', '/x/..\\admin/api/session', '/%61dmin', '/Admin', '/ADMIN/api/session', '/admin;x', '/r/admin/../../x\\..\\admin']) {
+    const res = await get(path);
+    assert.ok(!isAdmin(res), `${path} -> ${res.status}`);
+    assert.ok([400, 404].includes(res.status), `${path} -> ${res.status}`);
+  }
+  // The game itself is unaffected by the stricter reading.
+  const code = await createRoom();
+  for (const path of ['/', `/r/${code}`, `/r/${code}?seat=ABCDEFGH`, '/css/style.css', `/api/rooms/${code}`, '/manifest.webmanifest?room=x']) {
+    assert.equal((await get(path)).status, 200, path);
+  }
+  // A game connection on anything but a plain /ws is refused as well.
+  await new Promise((resolve) => {
+    const ws = new WebSocket(`ws://127.0.0.1:${PORT}//x/ws`);
+    ws.on('error', resolve);
+    ws.on('open', () => assert.fail('opened'));
+  });
+});
