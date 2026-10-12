@@ -39,7 +39,7 @@ Swipe is built on the same server as [Tradecraft](https://github.com/au12/tradec
 
 **The table**
 
-- Laid out for a phone held upright: whose turn it is at the top, then the pile, the table cards, and the hand below. Buttons under each section switch between the current player's cards and your own.
+- Laid out for a phone held upright: whose turn it is at the top, then the pile, the table cards, and the hand below. One button on the hand switches both the table cards and the hand between the current player's cards and your own.
 - The shuffle is a full-screen casino wash: the deck bursts, swirls, is raked back in, cut and riffled, and then your own cards are dealt to you. Cards fly from where they are to where they are going, piles get scooped up, and a swipe looks like one.
 - Sound effects are synthesised in the browser, so there are no audio files. Light and dark themes.
 
