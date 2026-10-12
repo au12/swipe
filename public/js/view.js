@@ -192,7 +192,7 @@ export function renderTable(state, me, ui) {
   const r = state.round;
   const el = $('#tablezone');
   if (!r) return (el.innerHTML = '');
-  const pid = viewed(state, me, ui.tableView);
+  const pid = viewed(state, me, ui.cardView);
   const seat = r.seats[pid];
   if (!seat) return (el.innerHTML = '');
   const mine = pid === me.id;
@@ -225,12 +225,10 @@ export function renderTable(state, me, ui) {
     })
     .join('');
 
-  const canToggle = inRound(state, me.id) && r.turn !== me.id && r.phase === 'play';
-  const other = playerOf(state, r.turn)?.name ?? 'theirs';
+  // Whose cards these are is switched from the hand below, which takes the table cards with it.
   el.innerHTML = `<div class="slots" data-pid="${esc(pid)}">${slots}</div>
     <div class="zone-foot">
       <span class="zone-label"><i class="dot" style="${tint(colorOf(state, pid))}"></i>${esc(whose(state, me, pid))} table cards</span>
-      ${canToggle ? `<button type="button" class="btn btn-small btn-mat" data-act="toggle-table">${icon('swap')}${mine ? `Show ${esc(possessive(other))}` : 'Show mine'}</button>` : ''}
     </div>`;
 }
 
@@ -457,7 +455,7 @@ export function renderHand(state, me, ui) {
   const r = state.round;
   const el = $('#handzone');
   if (!r) return (el.innerHTML = '');
-  const pid = viewed(state, me, ui.handView);
+  const pid = viewed(state, me, ui.cardView);
   const seat = r.seats[pid];
   if (!seat) return (el.innerHTML = '');
   const mine = pid === me.id;
@@ -485,7 +483,7 @@ export function renderHand(state, me, ui) {
   el.classList.toggle('is-acting', acting);
   el.innerHTML = `<div class="zone-head">
       <span class="zone-label"><i class="dot"></i>${esc(whose(state, me, pid))} hand<b class="zone-n">${seat.hand}</b></span>
-      ${canToggle ? `<button type="button" class="btn btn-small" data-act="toggle-hand">${icon('swap')}${mine ? `Show ${esc(possessive(other))}` : 'Show mine'}</button>` : ''}
+      ${canToggle ? `<button type="button" class="btn btn-small" data-act="toggle-cards">${icon('swap')}${mine ? `Show ${esc(possessive(other))}` : 'Show mine'}</button>` : ''}
     </div>
     <div class="hand${mine ? '' : ' is-backs'}" id="hand" data-pid="${esc(pid)}" data-n="${seat.hand}">${cards}</div>${empty}`;
   fitHand();

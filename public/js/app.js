@@ -53,8 +53,7 @@ let settingsSig = '';
 
 // What is on screen that the server doesn't decide.
 const ui = {
-  tableView: 'turn', // whose table cards: the player on turn, or 'me'
-  handView: 'turn',
+  cardView: 'turn', // whose cards are on show, table and hand together: the player on turn, or 'me'
   selected: new Set(),
   pile: { count: 0, top: [], backs: [], ranks: {} }, // the pile as drawn (it lags the server while cards are in the air)
   mat: null,
@@ -296,8 +295,7 @@ function enterRoom(code) {
   sizeCards();
   $('#invite-code').textContent = code;
   document.title = `${code} | ${cfg.siteName}`;
-  ui.tableView = store.get('tableView', 'turn') === 'me' ? 'me' : 'turn';
-  ui.handView = store.get('handView', 'turn') === 'me' ? 'me' : 'turn';
+  ui.cardView = store.get('cardView', store.get('handView', 'turn')) === 'me' ? 'me' : 'turn';
 
   // A link that carries a seat code (the Home Screen app's first launch) claims that seat.
   const params = new URLSearchParams(location.search);
@@ -1146,13 +1144,11 @@ function bindGlobal() {
         return send('start');
 
       // ── playing ──
-      case 'toggle-table':
-        ui.tableView = viewed(state, me, ui.tableView) === me.id ? 'turn' : 'me';
-        store.set('tableView', ui.tableView);
-        return renderTable(state, me, ui);
-      case 'toggle-hand':
-        ui.handView = viewed(state, me, ui.handView) === me.id ? 'turn' : 'me';
-        store.set('handView', ui.handView);
+      case 'toggle-cards':
+        // One switch for both: the table cards and the hand always show the same player.
+        ui.cardView = viewed(state, me, ui.cardView) === me.id ? 'turn' : 'me';
+        store.set('cardView', ui.cardView);
+        renderTable(state, me, ui);
         return renderHand(state, me, ui);
       case 'blind': {
         const slot = Number(el.dataset.slot);
