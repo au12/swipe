@@ -437,15 +437,22 @@ export function sortHand(cards) {
   return cards.slice().sort((a, b) => key(a) - key(b) || (a.s < b.s ? -1 : a.s > b.s ? 1 : a.id < b.id ? -1 : 1));
 }
 
+/** A hand of this many cards or fewer is always laid out in one row, however tightly it has to overlap. */
+export const ONE_ROW = 14;
+
 /**
- * Fits `n` overlapping cards into `width`: as few rows as will keep every
- * index readable. Returns the per-row count and how far apart cards sit.
+ * Fits `n` cards into `width`. Up to ONE_ROW of them always share one row;
+ * past that, as few rows as will keep every index readable. Returns the
+ * per-row count and how far apart cards sit: a row of `per` cards is
+ * `cw + (per - 1) * step` wide, whether they overlap or stand apart.
  */
 export function handFit(n, width, cw, { comfy = 0.44, tight = 0.3, maxRows = 3 } = {}) {
   if (n <= 0) return { per: 1, step: cw, rows: 1 };
+  const stepFor = (per) => (per > 1 ? Math.min(cw + 6, (width - cw) / (per - 1)) : cw);
+  if (n <= ONE_ROW) return { per: n, step: Math.max(stepFor(n), 4), rows: 1 };
   for (let rows = 1; rows <= 12; rows++) {
     const per = Math.ceil(n / rows);
-    const step = per > 1 ? Math.min(cw + 6, (width - cw) / (per - 1)) : cw;
+    const step = stepFor(per);
     if (step >= comfy * cw || (rows >= maxRows && step >= tight * cw) || rows === 12) return { per, step: Math.max(step, 8), rows };
   }
   return { per: n, step: cw, rows: 1 };
@@ -494,15 +501,30 @@ export function fitHand() {
   const hand = $('#hand');
   if (!hand) return;
   const n = Number(hand.dataset.n);
-  const cw = Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--cw')) || 60;
+  // The width cards are actually drawn at, which is what has to fit.
+  const cw = hand.firstElementChild?.getBoundingClientRect().width || Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--cw')) || 60;
   const box = getComputedStyle(hand.parentElement);
   const width = hand.parentElement.clientWidth - Number.parseFloat(box.paddingLeft) - Number.parseFloat(box.paddingRight) - 2;
   const backs = hand.classList.contains('is-backs');
   const fit = handFit(n, width, cw, backs ? { comfy: 0.3, tight: 0.2, maxRows: 2 } : {});
   const step = Math.floor(fit.step * 100) / 100;
   hand.style.setProperty('--step', `${step}px`);
-  hand.style.maxWidth = `${Math.ceil(Math.max(cw, step) + step * (fit.per - 1)) + 1}px`;
+  // Exactly one row's worth, so a second row starts where it was planned to and nowhere else.
+  hand.style.maxWidth = `${Math.ceil(cw + step * (fit.per - 1)) + 1}px`;
   hand.dataset.rows = fit.rows;
+}
+
+// The hand is fitted to its box, so it is fitted again whenever the box changes
+// size for any reason (a rotated phone, a scrollbar, a side panel folding away),
+// not only when the window does.
+if (typeof ResizeObserver === 'function') {
+  let seen = 0;
+  new ResizeObserver(([entry]) => {
+    const w = Math.round(entry.contentRect.width);
+    if (w === seen) return;
+    seen = w;
+    fitHand();
+  }).observe($('#handzone'));
 }
 
 // ───────────────────────── action bar ─────────────────────────
