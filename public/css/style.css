@@ -485,9 +485,14 @@ input:focus-visible, textarea:focus-visible, select:focus-visible { outline-offs
 .hand {
   --step: var(--cw); --rowlap: calc(var(--cw) * 0.72); --lift: calc(var(--cw) * 0.24);
   display: flex; flex-wrap: wrap; margin: 0 auto; width: 100%;
+  /* Cards that overlap are pulled left over their neighbor, and the row is
+     padded by the same amount so the first one stays put. Cards that stand
+     apart get a gap, which, unlike a margin, the first card of a row has none of:
+     either way a row of n cards is exactly cw + (n - 1) * step wide. */
+  column-gap: max(0px, calc(var(--step) - var(--cw)));
   padding: calc(var(--rowlap) + var(--lift)) 0 4px max(0px, calc(var(--cw) - var(--step)));
 }
-.hand > .card { margin-left: calc(var(--step) - var(--cw)); margin-top: calc(var(--rowlap) * -1); }
+.hand > .card { margin-left: min(0px, calc(var(--step) - var(--cw))); margin-top: calc(var(--rowlap) * -1); }
 .hand.is-backs { --rowlap: calc(var(--cw) * 1.02); --lift: 4px; }
 .hand-empty { color: var(--muted); font-size: 0.95rem; padding: 6px 0 2px; }
 
