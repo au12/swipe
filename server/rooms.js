@@ -1047,8 +1047,8 @@ export class Rooms {
         if (p.playing && !p.bot && !p.online && now() - p.seenAt > STALE_SEAT_MS) p.playing = false;
       }
     }
-    // Seats run clockwise in the order people sat down. Anyone joining a match
-    // that is already under way is added at the end.
+    // Who is playing this game: everyone still seated, and anyone who has just
+    // sat down. The seating itself is shuffled for every game (game.createRound).
     const keep = m.order.filter((pid) => room.players.get(pid)?.playing);
     const fresh = seated(room)
       .map((p) => p.id)
