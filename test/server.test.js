@@ -425,7 +425,7 @@ test('latecomers watch, can ask to be dealt in, and start on the table average',
   await host.do('start');
   await settle([...all, dee], (s) => s.round.no === 2 && s.round.phase === 'play', 'game two');
   assert.equal(dee.state.round.order.length, 4);
-  assert.equal(dee.state.round.order.at(-1), dee.id(), 'new players sit at the end');
+  assert.ok(dee.state.round.order.includes(dee.id()), 'a new player is dealt in');
   assert.equal(dee.state.match.scores[dee.id()], average);
   assert.equal(dee.state.round.mine.length, 12);
 });

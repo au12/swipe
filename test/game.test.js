@@ -11,6 +11,7 @@ const cards = (...ranks) => ranks.map(card);
 function table({ a = {}, b = {}, c = {}, pile = [] } = {}) {
   const r = game.createRound({ players: ['a', 'b', 'c'] });
   r.phase = 'play';
+  r.order = ['a', 'b', 'c']; // a fixed seating, whatever the deal shuffled it to
   r.turn = 0;
   for (const [pid, spec] of Object.entries({ a, b, c })) {
     const fill = (list) => Array.from({ length: 4 }, (_, i) => (list?.[i] ? card(list[i]) : null));
@@ -81,6 +82,22 @@ test('every game is led by whoever has the highest hand-and-table total, tens no
     assert.equal(game.leadTotal(r.seats[game.current(r)]), Math.max(...r.order.map((pid) => game.leadTotal(r.seats[pid]))));
     assert.equal(r.start.why, 'high');
   }
+});
+
+test('the seating is shuffled every game, with the leader sitting first', () => {
+  const players = ['a', 'b', 'c', 'd', 'e'];
+  const seen = new Set();
+  const after = new Map(); // who sits straight after 'a', when 'a' leads
+  for (let i = 0; i < 300; i++) {
+    const r = game.createRound({ players, no: i + 1 });
+    assert.equal(r.turn, 0, 'the leader takes the first turn');
+    assert.equal(r.order[0], r.start.pid, 'and sits first');
+    assert.deepEqual([...r.order].sort(), players, 'everyone is seated once');
+    seen.add(r.order.join(''));
+    if (r.order[0] === 'a') after.set(r.order[1], (after.get(r.order[1]) ?? 0) + 1);
+  }
+  assert.ok(seen.size > 60, `the seating changes from game to game (${seen.size} different seatings in 300 games)`);
+  assert.equal(after.size, 4, 'anyone can end up next to anyone');
 });
 
 test('tens can cost the lead, and a tie goes to chance among those tied', () => {

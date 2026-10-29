@@ -60,7 +60,12 @@ export function pickLead(players, seats, rnd = randomInt) {
   return { pid: tied[rnd(tied.length)], why: 'high', total: best };
 }
 
-/** Deals a round. Who leads is decided by the cards (pickLead), in every game of a match. */
+/**
+ * Deals a round. Who leads is decided by the cards (pickLead), in every game
+ * of a match. The seating is shuffled every game too: the leader sits first
+ * and everyone else follows in a fresh random order, so nobody is stuck
+ * playing straight after the same person game after game.
+ */
 export function createRound({ players, no = 1, rnd = randomInt }) {
   if (players.length < 2) throw new Error('Swipe needs at least two players');
   if (players.length > MAX_PLAYERS) throw new Error('Too many players');
@@ -77,13 +82,14 @@ export function createRound({ players, no = 1, rnd = randomInt }) {
   }
 
   const start = pickLead(players, seats, rnd);
+  const order = [start.pid, ...shuffle(players.filter((pid) => pid !== start.pid), rnd)];
 
   return {
     id: randomUUID().slice(0, 8),
     no,
     phase: 'deal', // deal | play | over
-    order: players.slice(),
-    turn: players.indexOf(start.pid),
+    order,
+    turn: 0, // the leader sits first
     turnNo: 1,
     seats,
     pile: [],

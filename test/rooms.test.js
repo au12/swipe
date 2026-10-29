@@ -45,7 +45,8 @@ function table(names) {
   assert.equal(rooms.act(room, people[0].player, { a: 'start' }), null);
   const r = room.round;
   r.phase = 'play';
-  r.turn = r.order.indexOf(people[0].player.id);
+  r.order = people.map((p) => p.player.id); // seated in the order given, whatever the deal shuffled it to
+  r.turn = 0;
   for (const p of people) p.sent.length = 0;
   return { rooms, room, r, people };
 }
