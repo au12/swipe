@@ -19,6 +19,16 @@ const cleanBase = (value) => {
   return trimmed ? `/${trimmed}` : '';
 };
 
+/** "https://arcade.example.com/anything" -> "https://arcade.example.com"; anything else -> "" */
+const cleanOrigin = (value) => {
+  try {
+    const url = new URL(String(value ?? '').trim());
+    return /^https?:$/.test(url.protocol) && url.host ? url.origin : '';
+  } catch {
+    return '';
+  }
+};
+
 export const config = {
   root,
   host: env.HOST || '0.0.0.0',
@@ -69,6 +79,9 @@ export const config = {
   pushRemindMs: int('PUSH_REMIND_MS', 20000, 0, 600000),
   // Messages one connection may send every five seconds before it is told to slow down.
   messageBudget: int('MESSAGE_BUDGET', 40, 5, 100000),
+  // The au12 Arcade (github.com/au12/arcade) this game belongs to, if any. It
+  // may show the game in a frame, and wins and losses are reported to it.
+  arcadeUrl: cleanOrigin(env.ARCADE_URL),
   logLevel: env.LOG_LEVEL || 'info',
 };
 

@@ -9,6 +9,7 @@
 //   GET  /sw.js            the service worker (installable app, notifications)
 //   GET  /manifest.webmanifest   the app manifest; with ?room=&seat= it opens
 //                          straight into that room and brings the seat along
+//   GET  /arcade.json      where the arcade is (only with ARCADE_URL set)
 //   WS   /ws               game traffic (JSON messages)
 
 import http from 'node:http';
@@ -36,13 +37,23 @@ const MIME = {
   '.txt': 'text/plain; charset=utf-8',
 };
 
-const SECURITY_HEADERS = {
+const STRICT_HEADERS = {
   'X-Content-Type-Options': 'nosniff',
   'Referrer-Policy': 'same-origin',
   'X-Frame-Options': 'SAMEORIGIN',
   'Content-Security-Policy':
     "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' ws: wss:; base-uri 'self'; form-action 'self'",
 };
+
+// With an arcade configured, the game may be shown in its frame and may talk
+// to it. The admin page keeps the strict set either way.
+const SECURITY_HEADERS = config.arcadeUrl
+  ? {
+      'X-Content-Type-Options': 'nosniff',
+      'Referrer-Policy': 'same-origin',
+      'Content-Security-Policy': `default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' ws: wss: ${config.arcadeUrl}; base-uri 'self'; form-action 'self'; frame-ancestors 'self' ${config.arcadeUrl}`,
+    }
+  : STRICT_HEADERS;
 
 const rooms = new Rooms();
 rooms.load();
@@ -269,6 +280,12 @@ async function handle(req, res) {
 
   if (req.method !== 'GET' && req.method !== 'HEAD') return send(res, 405, 'Method not allowed');
 
+  // Where the arcade is, for the arcade script when the game is opened on its own.
+  if (pathname === '/arcade.json') {
+    if (!config.arcadeUrl) return send(res, 404, { error: 'Not found.' });
+    return send(res, 200, { url: config.arcadeUrl }, { 'Cache-Control': 'no-cache' });
+  }
+
   if (pathname === '/manifest.webmanifest') {
     const manifest = JSON.parse(fs.readFileSync(path.join(config.publicDir, 'manifest.webmanifest'), 'utf8'));
     manifest.name = manifest.short_name = config.siteName;
@@ -291,7 +308,7 @@ async function handle(req, res) {
 // ───────────────────────── WebSocket ─────────────────────────
 
 const wss = new WebSocketServer({ noServer: true, maxPayload: 96 * 1024 });
-const admin = createAdmin({ rooms, sockets: () => wss.clients.size, clientIp, isHttps, send, readJson, securityHeaders: SECURITY_HEADERS });
+const admin = createAdmin({ rooms, sockets: () => wss.clients.size, clientIp, isHttps, send, readJson, securityHeaders: STRICT_HEADERS });
 
 server.on('upgrade', (req, socket, head) => {
   if (localPath(req.url) !== '/ws') {
@@ -415,6 +432,7 @@ push.loadKeys();
 server.listen(config.port, config.host, () => {
   log.info(`${config.siteName} is listening on http://${config.host}:${config.port}${config.basePath || ''}`);
   log.info(config.adminPassword ? `The admin page is at ${config.basePath}/admin` : 'The admin page is off. Set ADMIN_PASSWORD to turn it on.');
+  if (config.arcadeUrl) log.info(`Arcade: ${config.arcadeUrl} may show this game and receive its results`);
 });
 
 function shutdown(signal) {
