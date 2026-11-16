@@ -112,6 +112,7 @@ The repository includes a GitHub Actions workflow ([`.github/workflows/docker-im
    | Port | container `3000`, host `3001` (or any free port) |
    | Path | container `/data`, host `/mnt/user/appdata/swipe` |
    | Variable | `ADMIN_PASSWORD`, a long password of your own, if you want the [admin page](#the-admin-page) |
+   | Variable | `ARCADE_URL`, your arcade's address, if you run the [au12 Arcade](#in-the-arcade) |
 
 To update later, push your changes, let the workflow finish, then use **Check for Updates** on the Docker tab.
 
@@ -237,6 +238,7 @@ Everything is an environment variable. All are optional.
 | `DEAL_MS` | `8400` | How long the shuffle-and-deal sequence gets before play opens. Shorten it and the animation squeezes to fit; under about 3.6 seconds it is skipped. |
 | `MESSAGE_BUDGET` | `40` | Messages one connection may send every five seconds. |
 | `LOG_LEVEL` | `info` | `info`, `debug` or `silent`. |
+| `ARCADE_URL` | *(empty)* | Address of your [au12 Arcade](#in-the-arcade), e.g. `https://arcade.example.com`. Lets the arcade show the game and receive wins and losses. |
 
 The points limit and the turn clock are per room, in **Room settings**.
 
@@ -255,6 +257,19 @@ Notifications and installing need the HTTPS address; see [Notifications and inst
 **Visitors' addresses.** The admin page shows where each player connects from, and wrong admin passwords are counted per address. Behind a proxy every connection comes from the proxy, so the server reads `X-Forwarded-For` instead, and `TRUST_PROXY` says how many proxies add to it: `1` for Nginx Proxy Manager, nginx, Caddy or Traefik on their own (the default), `2` with Cloudflare in front of that, `0` with no proxy at all. The header is only believed when the connection comes from a private address (the same machine, a Docker network, your LAN or a VPN), so someone who reaches the app's port directly from outside cannot make one up. If the admin page shows the same address for everybody, the number is too low; if it shows nonsense, too high.
 
 If you put this on the public internet, consider setting `CREATE_PASSWORD` so strangers can't open rooms on your server, and `ALLOWED_ORIGINS` to your own address. If you turn on the admin page, give it a long password: anyone who can reach the site can reach its sign-in form.
+
+## In the arcade
+
+Swipe can run inside the [au12 Arcade](https://github.com/au12/arcade), the family launcher that puts every game behind one installable app, with shared players and high scores across the games (and a real cabinet, if you build one).
+
+Set `ARCADE_URL` to the arcade's address, for example `https://arcade.example.com`. Then:
+
+- Inside the arcade, you sit down under your arcade name, with no name to type. Each arcade player keeps a seat of their own, so the family can take turns at one screen.
+- The arcade shows the room's link as a QR code, so everyone else joins from their phones.
+- Every game you were dealt into counts as a win (you went out first) or a loss, and winning a whole match counts on its own board. They earn tickets and go on the arcade's Swipe leaderboards. Games that are called off don't count.
+- Played on its own rather than inside the arcade, the page still reports to the arcade for whoever that browser last played as there. It finds the arcade through `/arcade.json`, which the server only answers when `ARCADE_URL` is set.
+
+The server lets the arcade's address show the game in a frame (`frame-ancestors`) and talk to it (`connect-src`). The admin page is never framed. With `ARCADE_URL` empty, nothing changes.
 
 ## How it is put together
 
@@ -282,6 +297,8 @@ public/       the client: plain HTML, CSS and ES modules, served as-is
   js/chat.js    the chat panel and the banner a new message shows in
   js/stats.js   the all-time stat board
   js/app.js     the connection, taps, dialogs, and the order things animate in
+  js/arcade.js  the au12 Arcade: whose seat this is, and the wins and losses it hears of
+  js/vendor/arcade.js   the arcade's own script (MIT), unchanged
   sw.js         the service worker: shows notifications, makes the app installable
   admin/        the admin page: one HTML file, one script, one stylesheet
 test/         rules tests and end-to-end tests over real WebSockets

@@ -10,6 +10,7 @@ import * as fx from './fx.js';
 import * as push from './push.js';
 import * as chat from './chat.js';
 import * as stats from './stats.js';
+import { arcadeInvite, arcadeName, arcadeReady, arcadeReport, arcadeStatus, personal } from './arcade.js';
 import {
   colorOf,
   fitHand,
@@ -139,8 +140,8 @@ function boot() {
     if (store.get('seatUsed') === launchSeat) return location.replace(api('.'));
     store.set('seatUsed', launchSeat);
   }
-  if (code) enterRoom(code);
-  else showHome();
+  // In the arcade, wait to hear who is playing: each player has a seat of their own.
+  arcadeReady().then(() => (code ? enterRoom(code) : showHome()));
 }
 
 // ───────────────────────── home ─────────────────────────
@@ -226,11 +227,13 @@ async function homeTable() {
 function showHome() {
   show('home');
   document.title = cfg.siteName;
+  arcadeStatus('menu');
+  arcadeInvite(null);
   $('#create-password-row').hidden = !cfg.needsPassword;
   homeTable();
 
   // Opened from the Home Screen, or just come back: offer the room you were last in.
-  const last = store.get('room');
+  const last = store.get(personal('room'));
   if (last) {
     fetch(api(`api/rooms/${encodeURIComponent(last)}`))
       .then((res) => {
@@ -271,11 +274,11 @@ function showHome() {
 // ───────────────────────── room ─────────────────────────
 
 function token() {
-  let t = store.get('token');
+  let t = store.get(personal('token'));
   if (!t || t.length < 16) {
     const bytes = crypto.getRandomValues(new Uint8Array(18));
     t = [...bytes].map((b) => b.toString(16).padStart(2, '0')).join('');
-    store.set('token', t);
+    store.set(personal('token'), t);
   }
   return t;
 }
@@ -285,7 +288,7 @@ function askName({ rename = false } = {}) {
   dialog.dataset.rename = rename ? '1' : '';
   $('#name-submit').textContent = rename ? 'Save name' : 'Join room';
   $('#name-seat').hidden = rename;
-  $('#name-input').value = store.get('name', '');
+  $('#name-input').value = store.get(personal('name')) ?? arcadeName();
   if (!dialog.open) dialog.showModal();
   $('#name-input').select();
 }
@@ -295,6 +298,7 @@ function enterRoom(code) {
   sizeCards();
   $('#invite-code').textContent = code;
   document.title = `${code} | ${cfg.siteName}`;
+  arcadeInvite(api(`r/${encodeURIComponent(code)}`));
   ui.cardView = store.get('cardView', store.get('handView', 'turn')) === 'me' ? 'me' : 'turn';
 
   // A link that carries a seat code (the Home Screen app's first launch) claims that seat.
@@ -302,10 +306,11 @@ function enterRoom(code) {
   const claim = params.get('seat');
   if (claim) {
     history.replaceState(null, '', location.pathname);
-    return connect(code, store.get('name') ?? '', claim);
+    return connect(code, store.get(personal('name')) ?? arcadeName(), claim);
   }
 
-  const name = store.get('name');
+  // Someone the arcade knows sits straight down under their arcade name.
+  const name = store.get(personal('name')) ?? arcadeName();
   if (name) return connect(code, name);
   // No name yet: make sure the room exists before asking for one.
   fetch(api(`api/rooms/${encodeURIComponent(code)}`))
@@ -321,6 +326,7 @@ function followRename(code) {
   if (!code || code === currentRoomCode()) return;
   if (conn) conn.room = code;
   history.replaceState(null, '', api(`r/${encodeURIComponent(code)}`));
+  arcadeInvite(api(`r/${encodeURIComponent(code)}`));
   if (push.isIOS() && !push.standalone()) carrySeat();
 }
 
@@ -454,10 +460,12 @@ function commit(next, { dealing = false } = {}) {
   me = next.players.find((p) => p.id === next.you);
   ui.sending = false;
   // A seat that arrived by code brings its name with it.
-  if (!store.get('name')) store.set('name', me.name);
-  if (store.get('room') !== next.code) store.set('room', next.code);
+  if (!store.get(personal('name'))) store.set(personal('name'), me.name);
+  if (store.get(personal('room')) !== next.code) store.set(personal('room'), next.code);
   followRename(next.code);
   chat.setYou(me.id);
+  arcadeReport(prev, next);
+  arcadeStatus({ lobby: 'menu', game: 'playing', results: 'over' }[phaseOf(next)]);
 
   const r = next.round;
   // Keep only selections that are still playable; a flipped blind card is always in.
@@ -1020,7 +1028,7 @@ function enterSeatCode() {
   const code = window.prompt('Seat code from your other browser:');
   if (!code || !code.trim()) return;
   for (const id of ['dlg-name', 'dlg-settings']) if ($(`#${id}`).open) $(`#${id}`).close();
-  connect(currentRoomCode(), store.get('name') ?? '', code.trim());
+  connect(currentRoomCode(), store.get(personal('name')) ?? arcadeName(), code.trim());
 }
 
 function onSettingsChange(event) {
@@ -1211,7 +1219,7 @@ function bindGlobal() {
     event.preventDefault();
     const name = $('#name-input').value.replace(/\s+/g, ' ').trim().slice(0, 20);
     if (!name) return $('#name-input').focus();
-    store.set('name', name);
+    store.set(personal('name'), name);
     const dialog = $('#dlg-name');
     dialog.close();
     if (dialog.dataset.rename && conn && state) send('rename', { name });
